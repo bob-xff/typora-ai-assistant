@@ -1,12 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64" role="img" aria-label="Typora AI 学习助手">
-  <!-- 极简几何标记：渐变圆角方块 + 四芒星（知识灵感）+ 圆点（对话） -->
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#6366f1"/>
-      <stop offset="1" stop-color="#8b5cf6"/>
-    </linearGradient>
-  </defs>
-  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#g)"/>
-  <path d="M32 14 C33.5 24 36 26.5 46 28 C36 29.5 33.5 32 32 42 C30.5 32 28 29.5 18 28 C28 26.5 30.5 24 32 14 Z" fill="#ffffff"/>
-  <circle cx="45" cy="44" r="3.4" fill="#ffffff" opacity="0.85"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64" role="img" aria-label="xff助手一号">
+  <!-- 纯色几何标记：粉色圆角方块 + 白色对话气泡 + 粉星（灵感）· 无渐变 -->
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="#e0567d"/>
+  <path d="M32 13.5c-9.6 0-17.4 6-17.4 13.4 0 4.7 3.1 8.8 7.9 11.3-.4 2.3-1.7 4.4-3.5 5.9 3.3-.4 6.3-1.8 8.6-3.9 1.4.2 2.9.3 4.4.3 9.6 0 17.4-6 17.4-13.6S41.6 13.5 32 13.5z" fill="#ffffff"/>
+  <path d="M32 20.6c.9 3.5 1.7 4.3 5.2 5.2-3.5.9-4.3 1.7-5.2 5.2-.9-3.5-1.7-4.3-5.2-5.2 3.5-.9 4.3-1.7 5.2-5.2z" fill="#e0567d"/>
 </svg>

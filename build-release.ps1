@@ -1,11 +1,11 @@
 ﻿#Requires -Version 5.1
 <#
-    Typora AI 学习助手 · 打包脚本（开发者用）
+    xff助手一号 · 打包脚本（开发者用）
     ------------------------------------------------------------------
     生成可分发的安装包：
 
       dist\typora-ai-assistant\          ← 解压即可用的文件夹
-      dist\typora-ai-assistant-v2.3.zip  ← 发给别人的压缩包
+      dist\typora-ai-assistant-v2.4.0.zip ← 发给别人的压缩包
 
     包含内容：installer\（安装/卸载）、plugin\（插件本体）、README、VERSION。
     不含：bridge\（可选的桥接服务，仅开发者使用）、任何真实 API Key。
@@ -23,7 +23,7 @@ $STAGE   = Join-Path $OutDir $NAME.Replace("-v$VERSION", '')   # 目录名不带
 $ZIP     = Join-Path $OutDir "$NAME.zip"
 
 Write-Host ''
-Write-Host "  打包 Typora AI 学习助手 v$VERSION" -ForegroundColor Cyan
+Write-Host "  打包 xff助手一号 v$VERSION" -ForegroundColor Cyan
 Write-Host ''
 
 # 清理

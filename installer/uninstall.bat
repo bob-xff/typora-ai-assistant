@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  Typora AI Study Assistant - Uninstaller
+rem  xff Assistant No.1 - Uninstaller
 rem  Double-click this file. It will ask for admin rights.
 rem ============================================================
 setlocal

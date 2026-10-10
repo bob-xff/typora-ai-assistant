@@ -1,23 +1,29 @@
 /* ==========================================================================
-   Typora AI 学习助手 · 界面样式 v2.3
-   设计语言：纯白/纸感底色、柔和灰面（卡片与输入区）、大圆角、极细分割线、
-            黑色主按钮 + 靛蓝点缀；深浅主题跟随 Typora。
+   xff助手一号 · 界面样式 v2.4
+   设计语言：以「淡粉」为主色的清爽纸感界面 —— 纯色、零渐变；
+            白色面板 + 粉色柔面卡片、大圆角、极细分割线、
+            玫瑰粉作强调与主按钮；深浅主题跟随 Typora。
    ========================================================================== */
 
 #tyai-root {
-  --accent: #6366f1;
-  --accent-2: #8b5cf6;
+  /* —— 粉色主色阶（纯色，无渐变） —— */
+  --accent: #e0567d;        /* 玫瑰粉 · 强调色（图标 / 装饰 / 描边） */
+  --accent-ink: #c53e66;    /* 深玫瑰 · 文本链接（对比更足） */
+  --accent-soft: #fdeef3;   /* 极浅粉 · 弱面 */
+  --accent-soft-2: #f9dbe6; /* 浅粉 · 悬停面 */
+  --accent-line: #f6cfdd;   /* 粉描边 */
+
   --surface: #ffffff;
-  --soft: #f6f6f8;
-  --soft-2: #efeff2;
-  --line: #ececef;
-  --text: #1a1a1c;
-  --muted: #8c8c95;
-  --ink: #17171a;
+  --soft: #fdf2f6;          /* 卡片 / 输入底（淡粉白） */
+  --soft-2: #f8e6ee;
+  --line: #f3e0e8;
+  --text: #2c2226;
+  --muted: #a1939a;
+  --ink: #e0567d;           /* 主按钮（粉） */
   --ink-fg: #ffffff;
-  --ok: #10b981;
-  --warn: #f59e0b;
-  --err: #ef4444;
+  --ok: #2fa87c;
+  --warn: #d09312;
+  --err: #d95a5a;
   --radius: 18px;
   font-family: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   font-size: 13.5px;
@@ -27,6 +33,7 @@
 
 #tyai-root svg { display: block; }
 #tyai-root .tyai-i { flex: none; }
+#tyai-root .tyai-mark { flex: none; display: block; }
 
 /* ---------- 悬浮球 ---------- */
 
@@ -40,11 +47,11 @@
   cursor: pointer;
   user-select: none;
   border-radius: 50%;
-  filter: drop-shadow(0 6px 16px rgba(99, 102, 241, 0.34));
+  filter: drop-shadow(0 6px 16px rgba(224, 86, 125, 0.32));
   transition: transform 0.18s ease, filter 0.18s ease;
 }
 
-#tyai-root .tyai-ball:hover { transform: scale(1.07); filter: drop-shadow(0 8px 20px rgba(99, 102, 241, 0.46)); }
+#tyai-root .tyai-ball:hover { transform: scale(1.07); filter: drop-shadow(0 8px 20px rgba(224, 86, 125, 0.44)); }
 #tyai-root .tyai-ball:active { transform: scale(0.95); }
 #tyai-root .tyai-ball svg { border-radius: 50%; }
 
@@ -61,7 +68,7 @@
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 12px 34px rgba(90, 30, 50, 0.16);
 }
 
 #tyai-root .tyai-bubble.on { display: flex; animation: tyai-pop 0.14s ease; }
@@ -80,7 +87,7 @@
   align-items: center;
 }
 
-#tyai-root .tyai-bubble button:hover { background: var(--soft); color: var(--accent); }
+#tyai-root .tyai-bubble button:hover { background: var(--accent-soft); color: var(--accent-ink); }
 
 @keyframes tyai-pop {
   from { opacity: 0; transform: translateY(4px); }
@@ -103,7 +110,7 @@
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: 0 24px 70px rgba(15, 15, 25, 0.16), 0 2px 6px rgba(15, 15, 25, 0.04);
+  box-shadow: 0 24px 70px rgba(90, 30, 50, 0.14), 0 2px 6px rgba(90, 30, 50, 0.04);
   opacity: 0;
   transform: translateX(20px) scale(0.985);
   pointer-events: none;
@@ -125,7 +132,11 @@
 
 #tyai-root .tyai-logo { flex: none; display: block; }
 
-#tyai-root .tyai-title { font-weight: 600; font-size: 13.5px; letter-spacing: 0.2px; }
+#tyai-root .tyai-title {
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: 0.2px;
+}
 
 #tyai-root .tyai-status {
   margin-left: auto;
@@ -169,7 +180,7 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-#tyai-root .tyai-icobtn:hover { background: var(--soft); color: var(--text); }
+#tyai-root .tyai-icobtn:hover { background: var(--accent-soft); color: var(--accent-ink); }
 
 #tyai-root .tyai-x {
   flex: none;
@@ -184,7 +195,7 @@
   user-select: none;
 }
 
-#tyai-root .tyai-x:hover { background: var(--soft); color: var(--text); }
+#tyai-root .tyai-x:hover { background: var(--accent-soft); color: var(--accent-ink); }
 
 /* ---------- 模式切换（分段控件） ---------- */
 
@@ -211,13 +222,13 @@
   transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
-#tyai-root .tyai-seg button:hover { color: var(--text); }
+#tyai-root .tyai-seg button:hover { color: var(--accent-ink); }
 
 #tyai-root .tyai-seg button.on {
   background: var(--surface);
-  color: var(--text);
+  color: var(--accent-ink);
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(15, 15, 25, 0.1);
+  box-shadow: 0 1px 3px rgba(90, 30, 50, 0.1);
 }
 
 /* ---------- 视图容器 ---------- */
@@ -231,11 +242,11 @@
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
-  scrollbar-color: rgba(130, 130, 145, 0.3) transparent;
+  scrollbar-color: rgba(224, 86, 125, 0.28) transparent;
 }
 
 #tyai-root .tyai-scroll::-webkit-scrollbar { width: 6px; }
-#tyai-root .tyai-scroll::-webkit-scrollbar-thumb { background: rgba(130, 130, 145, 0.3); border-radius: 3px; }
+#tyai-root .tyai-scroll::-webkit-scrollbar-thumb { background: rgba(224, 86, 125, 0.28); border-radius: 3px; }
 #tyai-root .tyai-scroll::-webkit-scrollbar-track { background: transparent; }
 
 /* ---------- 首页 ---------- */
@@ -244,10 +255,10 @@
 
 #tyai-root .tyai-hello {
   margin: 10px 0 18px;
-  font-size: 23px;
-  line-height: 1.34;
+  font-size: 24px;
+  line-height: 1.32;
   font-weight: 700;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.4px;
 }
 
 #tyai-root .tyai-card {
@@ -256,18 +267,18 @@
   gap: 11px;
   width: 100%;
   text-align: left;
-  border: 0;
-  background: var(--soft);
+  border: 1px solid var(--line);
+  background: var(--surface);
   color: var(--text);
   font: inherit;
   padding: 13px 14px;
   border-radius: 14px;
   margin-bottom: 9px;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
-#tyai-root .tyai-card:hover { background: var(--soft-2); transform: translateY(-1px); }
+#tyai-root .tyai-card:hover { background: var(--accent-soft); border-color: var(--accent-line); transform: translateY(-1px); }
 
 #tyai-root .tyai-card-ic {
   flex: none;
@@ -277,17 +288,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--surface);
+  background: var(--accent-soft);
   color: var(--accent);
-  box-shadow: 0 1px 3px rgba(15, 15, 25, 0.06);
 }
 
 #tyai-root .tyai-card-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #tyai-root .tyai-card-tx b { font-size: 13.5px; font-weight: 600; }
 #tyai-root .tyai-card-tx i { font-style: normal; font-size: 11.5px; color: var(--muted); }
 
-#tyai-root .tyai-card-go { flex: none; color: var(--muted); transition: transform 0.15s ease; }
-#tyai-root .tyai-card:hover .tyai-card-go { transform: translateX(2px); color: var(--text); }
+#tyai-root .tyai-card-go { flex: none; color: var(--muted); transition: transform 0.15s ease, color 0.15s ease; }
+#tyai-root .tyai-card:hover .tyai-card-go { transform: translateX(2px); color: var(--accent-ink); }
 
 #tyai-root .tyai-tip { font-size: 11.5px; color: var(--muted); margin: 14px 2px 0; }
 
@@ -320,7 +330,7 @@
 #tyai-root .tyai-msg-user { flex-direction: row-reverse; }
 #tyai-root .tyai-msg-user .tyai-msg-body { display: flex; justify-content: flex-end; }
 #tyai-root .tyai-msg-user .tyai-msg-text {
-  background: var(--soft);
+  background: var(--accent-soft);
   border-radius: 12px;
   padding: 8px 12px;
   max-width: 86%;
@@ -343,7 +353,7 @@
 #tyai-root .tyai-msg-text blockquote {
   margin: 0.5em 0;
   padding: 2px 0 2px 11px;
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--accent-line);
   color: var(--muted);
 }
 #tyai-root .tyai-msg-text code {
@@ -369,7 +379,7 @@
   text-align: left;
 }
 #tyai-root .tyai-msg-text th { background: var(--soft); font-weight: 600; }
-#tyai-root .tyai-msg-text a { color: var(--accent); text-decoration: none; }
+#tyai-root .tyai-msg-text a { color: var(--accent-ink); text-decoration: none; }
 #tyai-root .tyai-msg-text a:hover { text-decoration: underline; }
 #tyai-root .tyai-msg-text hr { border: 0; border-top: 1px solid var(--line); margin: 0.8em 0; }
 #tyai-root .tyai-msg-text details {
@@ -378,7 +388,7 @@
   padding: 8px 12px;
   margin: 0.6em 0;
 }
-#tyai-root .tyai-msg-text summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+#tyai-root .tyai-msg-text summary { cursor: pointer; font-weight: 600; color: var(--accent-ink); }
 
 /* ---------- 智能体 ---------- */
 
@@ -402,11 +412,11 @@
   transition: all 0.15s ease;
 }
 
-#tyai-root .tyai-chip:hover { background: var(--soft); color: var(--text); border-color: transparent; }
+#tyai-root .tyai-chip:hover { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
 
 #tyai-root .tyai-agent-hint {
   font-size: 11.5px;
-  color: var(--accent);
+  color: var(--accent-ink);
   padding: 0 14px;
   min-height: 0;
   margin-bottom: 6px;
@@ -456,7 +466,7 @@
 #tyai-root .tyai-step-body pre code { background: transparent; padding: 0; }
 
 @keyframes tyai-pulse {
-  50% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.14); }
+  50% { box-shadow: 0 0 0 4px rgba(224, 86, 125, 0.16); }
 }
 
 /* ---------- 快捷 ---------- */
@@ -475,8 +485,8 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  border: 0;
-  background: var(--soft);
+  border: 1px solid var(--line);
+  background: var(--surface);
   color: var(--text);
   font: inherit;
   font-size: 12.5px;
@@ -484,10 +494,10 @@
   border-radius: 13px;
   cursor: pointer;
   text-align: left;
-  transition: background 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
-#tyai-root .tyai-scene:hover { background: var(--soft-2); transform: translateY(-1px); }
+#tyai-root .tyai-scene:hover { background: var(--accent-soft); border-color: var(--accent-line); transform: translateY(-1px); }
 
 #tyai-root .tyai-scene-ic {
   width: 26px;
@@ -496,10 +506,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--surface);
+  background: var(--accent-soft);
   color: var(--accent);
   margin-bottom: 3px;
-  box-shadow: 0 1px 3px rgba(15, 15, 25, 0.06);
 }
 
 #tyai-root .tyai-scene b { font-weight: 600; }
@@ -533,9 +542,9 @@
 #tyai-root .tyai-quick-result table { border-collapse: collapse; width: 100%; font-size: 0.94em; margin: 0.6em 0; }
 #tyai-root .tyai-quick-result th, #tyai-root .tyai-quick-result td { border: 1px solid var(--line); padding: 5px 9px; }
 #tyai-root .tyai-quick-result th { background: var(--soft); font-weight: 600; }
-#tyai-root .tyai-quick-result blockquote { margin: 0.5em 0; border-left: 3px solid var(--accent); padding-left: 11px; color: var(--muted); }
+#tyai-root .tyai-quick-result blockquote { margin: 0.5em 0; border-left: 3px solid var(--accent-line); padding-left: 11px; color: var(--muted); }
 #tyai-root .tyai-quick-result details { border: 1px solid var(--line); border-radius: 11px; padding: 8px 12px; margin: 0.6em 0; }
-#tyai-root .tyai-quick-result summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+#tyai-root .tyai-quick-result summary { cursor: pointer; font-weight: 600; color: var(--accent-ink); }
 
 /* ---------- 输入区 ---------- */
 
@@ -564,17 +573,21 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-#tyai-root .tyai-actions button:hover { background: var(--soft); color: var(--text); }
+#tyai-root .tyai-actions button:hover { background: var(--accent-soft); color: var(--accent-ink); }
 
 #tyai-root .tyai-box {
   background: var(--soft);
   border: 1px solid transparent;
   border-radius: 16px;
   padding: 10px 10px 8px 12px;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-#tyai-root .tyai-box:focus-within { background: var(--surface); border-color: var(--line); box-shadow: 0 2px 10px rgba(15, 15, 25, 0.05); }
+#tyai-root .tyai-box:focus-within {
+  background: var(--surface);
+  border-color: var(--accent-line);
+  box-shadow: 0 2px 12px rgba(224, 86, 125, 0.1);
+}
 
 #tyai-root .tyai-box textarea {
   display: block;
@@ -608,19 +621,19 @@
   align-items: center;
   gap: 5px;
   max-width: 190px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--text);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
   font: inherit;
   font-size: 11.5px;
   padding: 4px 9px;
   border-radius: 999px;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
-#tyai-root .tyai-pill:hover { border-color: var(--muted); }
-#tyai-root .tyai-pill.warn { color: var(--warn); border-color: rgba(245, 158, 11, 0.45); }
+#tyai-root .tyai-pill:hover { border-color: var(--accent); background: var(--accent-soft-2); }
+#tyai-root .tyai-pill.warn { color: var(--warn); border-color: rgba(208, 147, 18, 0.45); background: rgba(208, 147, 18, 0.08); }
 #tyai-root .tyai-pill-ic { color: var(--accent); display: flex; }
 #tyai-root .tyai-pill > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -649,9 +662,9 @@
   transition: transform 0.12s ease, opacity 0.15s ease;
 }
 
-#tyai-root .tyai-send:hover { opacity: 0.88; }
+#tyai-root .tyai-send:hover { opacity: 0.9; }
 #tyai-root .tyai-send:active { transform: scale(0.93); }
-#tyai-root .tyai-send.stop { background: var(--err); }
+#tyai-root .tyai-send.stop { background: var(--err); color: #fff; }
 
 /* ---------- 弹层（模型 / 会话） ---------- */
 
@@ -666,7 +679,7 @@
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 14px;
-  box-shadow: 0 18px 48px rgba(15, 15, 25, 0.18);
+  box-shadow: 0 18px 48px rgba(90, 30, 50, 0.18);
   padding: 6px;
   animation: tyai-pop 0.14s ease;
 }
@@ -685,7 +698,7 @@
 #tyai-root .tyai-pop-new {
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-ink);
   font: inherit;
   font-size: 11.5px;
   cursor: pointer;
@@ -693,7 +706,7 @@
   border-radius: 7px;
 }
 
-#tyai-root .tyai-pop-new:hover { background: var(--soft); }
+#tyai-root .tyai-pop-new:hover { background: var(--accent-soft); }
 
 #tyai-root .tyai-pop-group {
   font-size: 10.5px;
@@ -719,9 +732,9 @@
   transition: background 0.12s ease;
 }
 
-#tyai-root .tyai-pop-item:hover { background: var(--soft); }
+#tyai-root .tyai-pop-item:hover { background: var(--accent-soft); }
 #tyai-root .tyai-pop-item > span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#tyai-root .tyai-pop-item.on { color: var(--accent); font-weight: 600; }
+#tyai-root .tyai-pop-item.on { color: var(--accent-ink); font-weight: 600; }
 
 #tyai-root .tyai-pop-sep { height: 1px; background: var(--line); margin: 6px 8px; }
 
@@ -738,8 +751,8 @@
   font-size: 12.5px;
 }
 
-#tyai-root .tyai-sess-item:hover { background: var(--soft); }
-#tyai-root .tyai-sess-item.on { color: var(--accent); font-weight: 600; }
+#tyai-root .tyai-sess-item:hover { background: var(--accent-soft); }
+#tyai-root .tyai-sess-item.on { color: var(--accent-ink); font-weight: 600; }
 #tyai-root .tyai-sess-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #tyai-root .tyai-sess-item i { font-style: normal; font-size: 10.5px; color: var(--muted); flex: none; }
 
@@ -751,7 +764,7 @@
 #tyai-root .tyai-mask {
   position: absolute;
   inset: 0;
-  background: rgba(20, 20, 28, 0.32);
+  background: rgba(60, 25, 40, 0.3);
   animation: tyai-fade 0.16s ease;
 }
 
@@ -768,7 +781,7 @@
   background: var(--surface);
   border-top-left-radius: 18px;
   border-top-right-radius: 18px;
-  box-shadow: 0 -12px 40px rgba(15, 15, 25, 0.2);
+  box-shadow: 0 -12px 40px rgba(90, 30, 50, 0.2);
   animation: tyai-slide 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -796,7 +809,7 @@
   color: var(--muted);
   margin-bottom: 5px;
 }
-#tyai-root .tyai-field > span i { font-style: normal; color: var(--text); font-weight: 600; }
+#tyai-root .tyai-field > span i { font-style: normal; color: var(--accent-ink); font-weight: 600; }
 
 #tyai-root .tyai-field select,
 #tyai-root .tyai-field input[type="text"],
@@ -836,8 +849,8 @@
   margin: 10px 0 0;
 }
 
-#tyai-root .tyai-testnote.is-ok { background: rgba(16, 185, 129, 0.12); color: #0f9b6c; }
-#tyai-root .tyai-testnote.is-err { background: rgba(239, 68, 68, 0.1); color: #d13b3b; }
+#tyai-root .tyai-testnote.is-ok { background: rgba(47, 168, 124, 0.12); color: #1f7f5e; }
+#tyai-root .tyai-testnote.is-err { background: rgba(217, 90, 90, 0.1); color: #c04646; }
 
 #tyai-root .tyai-sheet-foot {
   display: flex;
@@ -857,10 +870,10 @@
   padding: 9px 0;
   border-radius: 12px;
   cursor: pointer;
-  transition: background 0.15s ease, opacity 0.15s ease;
+  transition: background 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
 }
 
-#tyai-root .tyai-btn:hover { background: var(--soft); }
+#tyai-root .tyai-btn:hover { background: var(--soft); border-color: var(--accent-line); }
 
 #tyai-root .tyai-btn.primary {
   border-color: transparent;
@@ -869,16 +882,16 @@
   font-weight: 600;
 }
 
-#tyai-root .tyai-btn.primary:hover { opacity: 0.88; background: var(--ink); }
+#tyai-root .tyai-btn.primary:hover { opacity: 0.9; background: var(--ink); }
 
 /* ---------- 通用组件 ---------- */
 
 #tyai-root .tyai-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 20px 0; }
 
 #tyai-root .tyai-err {
-  background: rgba(239, 68, 68, 0.07);
-  border: 1px solid rgba(239, 68, 68, 0.22);
-  color: #c73838;
+  background: rgba(217, 90, 90, 0.07);
+  border: 1px solid rgba(217, 90, 90, 0.22);
+  color: #c04646;
   border-radius: 11px;
   padding: 9px 12px;
   font-size: 12px;
@@ -903,7 +916,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--muted);
+  background: var(--accent);
   animation: tyai-blink 1.1s ease-in-out infinite;
 }
 #tyai-root .tyai-loading span:nth-child(2) { animation-delay: 0.18s; }
@@ -920,7 +933,7 @@
   bottom: 90px;
   transform: translateX(-50%);
   z-index: 2147483602;
-  background: rgba(28, 28, 34, 0.92);
+  background: rgba(201, 62, 102, 0.94);
   color: #fff;
   font-size: 12px;
   padding: 7px 16px;
@@ -946,23 +959,26 @@
   }
 }
 
-/* ---------- 深色主题 ---------- */
+/* ---------- 深色主题（保持同源粉色，纯色无渐变） ---------- */
 #tyai-root[data-theme="dark"] {
-  --surface: #1c1d22;
-  --soft: #26272d;
-  --soft-2: #2f3037;
-  --line: #34353d;
-  --text: #ecedee;
-  --muted: #97979f;
-  --ink: #ecedee;
-  --ink-fg: #1c1d22;
+  --accent: #f07c9c;
+  --accent-ink: #f59ab4;
+  --accent-soft: rgba(240, 124, 156, 0.14);
+  --accent-soft-2: rgba(240, 124, 156, 0.22);
+  --accent-line: rgba(240, 124, 156, 0.34);
+  --surface: #1d181b;
+  --soft: #262023;
+  --soft-2: #30282c;
+  --line: #3a2f34;
+  --text: #f2ebee;
+  --muted: #a3969c;
+  --ink: #ec6a8e;
+  --ink-fg: #241318;
   color-scheme: dark;
 }
 
-#tyai-root[data-theme="dark"] .tyai-panel { box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6); }
+#tyai-root[data-theme="dark"] .tyai-panel { box-shadow: 0 24px 70px rgba(0, 0, 0, 0.62); }
 #tyai-root[data-theme="dark"] .tyai-err { color: #f0a3a3; }
-#tyai-root[data-theme="dark"] .tyai-testnote.is-ok { color: #6ee7b7; }
+#tyai-root[data-theme="dark"] .tyai-testnote.is-ok { color: #6fd8ab; }
 #tyai-root[data-theme="dark"] .tyai-testnote.is-err { color: #fca5a5; }
 #tyai-root[data-theme="dark"] .tyai-ball svg { border-radius: 50%; }
-#tyai-root[data-theme="dark"] .tyai-card-ic { background: #32333b; }
-#tyai-root[data-theme="dark"] .tyai-scene-ic { background: #32333b; }

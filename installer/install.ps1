@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 <#
-    Typora AI 学习助手 · 安装脚本 v2.3
+    xff助手一号 · 安装脚本 v2.4
     ------------------------------------------------------------------
     双击同目录的 install.bat 即可（会自动请求管理员权限）。
 
@@ -41,7 +41,7 @@ $PLUGIN_DIR = Join-Path $PKG_ROOT 'plugin'
 
 Write-Host ''
 Write-Host '  ==========================================================' -ForegroundColor Cyan
-Write-Host "        Typora AI 学习助手  v$VERSION  ·  安装" -ForegroundColor Cyan
+Write-Host "        xff助手一号  v$VERSION  ·  安装" -ForegroundColor Cyan
 Write-Host '  ==========================================================' -ForegroundColor Cyan
 Write-Host ''
 

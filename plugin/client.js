@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Typora AI 学习助手 · 前端 v2.3
+   xff助手一号 · 前端 v2.4
    --------------------------------------------------------------------------
    设计：清爽白底 + 大留白 + 大圆角输入容器；对话 / 智能体 / 快捷 三模式；
         输入区内置「模型切换」下拉与「配置」面板，API Key 只存在本机。
@@ -15,7 +15,7 @@
   if (window.__TYPORA_AI_BRIDGE_V3__) return;
   window.__TYPORA_AI_BRIDGE_V3__ = true;
 
-  var VERSION = '2.3';
+  var VERSION = '2.4';
   var PORT = window.__AI_BRIDGE_PORT__ || 8765;
   var TOKEN = window.__AI_BRIDGE_TOKEN__ || '';
   var BASE = 'http://127.0.0.1:' + PORT;
@@ -58,19 +58,15 @@
   }
 
   /* ======================================================================
-   * Logo：极简几何标记 —— 渐变圆角方块 + 四芒星光
+   * Logo：纯色几何标记 —— 粉色圆角方块 + 白色对话气泡 + 粉星（灵感）
+   *       全纯色填充，无任何渐变。
    * ==================================================================== */
 
   function logoMark(size) {
     return '<svg class="tyai-mark" width="' + size + '" height="' + size + '" viewBox="0 0 64 64" aria-hidden="true">' +
-      '<defs>' +
-      '<linearGradient id="tyai-lg" x1="0" y1="0" x2="1" y2="1">' +
-      '<stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/>' +
-      '</linearGradient>' +
-      '</defs>' +
-      '<rect x="2" y="2" width="60" height="60" rx="17" fill="url(#tyai-lg)"/>' +
-      '<path d="M32 14 C33.5 24 36 26.5 46 28 C36 29.5 33.5 32 32 42 C30.5 32 28 29.5 18 28 C28 26.5 30.5 24 32 14 Z" fill="#fff"/>' +
-      '<circle cx="45" cy="44" r="3.4" fill="#fff" opacity=".85"/>' +
+      '<rect x="2" y="2" width="60" height="60" rx="18" fill="#e0567d"/>' +
+      '<path d="M32 13.5c-9.6 0-17.4 6-17.4 13.4 0 4.7 3.1 8.8 7.9 11.3-.4 2.3-1.7 4.4-3.5 5.9 3.3-.4 6.3-1.8 8.6-3.9 1.4.2 2.9.3 4.4.3 9.6 0 17.4-6 17.4-13.6S41.6 13.5 32 13.5z" fill="#ffffff"/>' +
+      '<path d="M32 20.6c.9 3.5 1.7 4.3 5.2 5.2-3.5.9-4.3 1.7-5.2 5.2-.9-3.5-1.7-4.3-5.2-5.2 3.5-.9 4.3-1.7 5.2-5.2z" fill="#e0567d"/>' +
       '</svg>';
   }
 
@@ -991,14 +987,14 @@
     root.id = 'tyai-root';
     root.setAttribute('data-theme', detectTheme());
     root.innerHTML =
-      '<div id="tyai-ball" class="tyai-ball" title="AI 学习助手 · Ctrl+Alt+K">' + logoMark(40) + '</div>' +
+      '<div id="tyai-ball" class="tyai-ball" title="xff助手一号 · Ctrl+Alt+K">' + logoMark(40) + '</div>' +
       '<div id="tyai-bubble" class="tyai-bubble"></div>' +
 
       '<div id="tyai-panel" class="tyai-panel">' +
 
       '  <div class="tyai-head">' +
       '    <span class="tyai-logo">' + logoMark(26) + '</span>' +
-      '    <span class="tyai-title">AI 学习助手</span>' +
+      '    <span class="tyai-title">xff助手一号</span>' +
       '    <span class="tyai-status" id="tyai-status">连接中…</span>' +
       '    <button class="tyai-icobtn" id="tyai-sess-btn" title="历史会话">' + icon('history', 17) + '</button>' +
       '    <span class="tyai-x" id="tyai-close" title="关闭">' + icon('x', 16) + '</span>' +

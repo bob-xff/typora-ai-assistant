@@ -416,7 +416,7 @@ async function handleAgent(req, res) {
 }
 
 const DEBUG_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-<title>AI 桥接服务 · 本地测试台</title>
+<title>xff助手一号 · 本地测试台</title>
 <link rel="stylesheet" href="/client.css">
 <style>
   html,body{margin:0;height:100%;font-family:system-ui,"Microsoft YaHei",sans-serif;background:#f5f5f3;color:#2c2c2a}
@@ -428,7 +428,7 @@ const DEBUG_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8
   code{background:#f1efe8;padding:1px 4px;border-radius:4px}
 </style></head><body>
 <div class="wrap">
-  <h1>AI 桥接服务 · 本地测试台</h1>
+  <h1>xff助手一号 · 本地测试台</h1>
   <p class="tip">这是一个假的 Typora 编辑区。选中下面的文字试试划词功能，界面和注入到 Typora 里的是同一套代码。</p>
   <div id="write" contenteditable="true"><h2>示例文档</h2>
     <p>梯度下降是一种迭代优化算法，用来寻找函数的局部最小值。它沿着梯度的反方向更新参数，因为梯度的方向是函数上升最快的方向。</p>
@@ -535,7 +535,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(CONFIG.port, '127.0.0.1', () => {
   const line = '─'.repeat(52);
   console.log(line);
-  console.log('  Typora AI 桥接服务已启动');
+  console.log('  xff助手一号 · 桥接服务已启动');
   console.log('  地址   : http://127.0.0.1:' + CONFIG.port);
   console.log('  模型   : ' + CONFIG.provider + ' / ' + CONFIG.model);
   console.log('  Key    : ' + (CONFIG.apiKey ? '已配置' : '❌ 未配置 —— 请编辑 bridge/config.json'));

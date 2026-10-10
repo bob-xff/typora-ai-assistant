@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Typora AI 学习助手 · 注入引导脚本 v2.3
+   xff助手一号 · 注入引导脚本 v2.4
    唯一需要写进 Typora 安装目录的文件。负责把界面加载起来：
 
    通道 A（可选增强）：本地桥接服务在跑 → 从它拉最新界面代码（支持热更新）
@@ -12,8 +12,8 @@
 (function () {
   'use strict';
 
-  if (window.__TYPORA_AI_INJECTED__ === '2.3') return;
-  window.__TYPORA_AI_INJECTED__ = '2.3';
+  if (window.__TYPORA_AI_INJECTED__ === '2.4') return;
+  window.__TYPORA_AI_INJECTED__ = '2.4';
 
   var PORT = 8765;
   var BASE = 'http://127.0.0.1:' + PORT;
@@ -33,7 +33,7 @@
   var hint = null;
 
   function log() {
-    try { console.log.apply(console, ['[AI 桥接]'].concat([].slice.call(arguments))); } catch (e) {}
+    try { console.log.apply(console, ['[xff助手]'].concat([].slice.call(arguments))); } catch (e) {}
   }
 
   /* ---------------- 提示点 ---------------- */
@@ -45,7 +45,7 @@
       hint.id = 'tyai-hint';
       hint.style.cssText =
         'position:fixed;right:30px;bottom:30px;width:14px;height:14px;border-radius:50%;' +
-        'background:#6366f1;opacity:.45;cursor:pointer;z-index:2147483000;' +
+        'background:#e0567d;opacity:.45;cursor:pointer;z-index:2147483000;' +
         'animation:tyai-hint-blink 1.4s ease-in-out infinite;';
       var st = document.createElement('style');
       st.textContent = '@keyframes tyai-hint-blink{50%{opacity:.15}}';
@@ -170,7 +170,7 @@
 
   function onAllFailed(msg) {
     log(msg);
-    setHint('AI 学习助手加载失败：' + msg + '\n\n请重新运行安装包里的 install.bat 修复。');
+    setHint('xff助手一号加载失败：' + msg + '\n\n请重新运行安装包里的 install.bat 修复。');
     // 兜底重试：桥接可能稍后被启动，本地文件也可能刚被修复
     var tries = 0;
     var iv = setInterval(function () {
@@ -200,7 +200,7 @@
   }
 
   function boot() {
-    setHint('AI 学习助手：正在加载…');
+    setHint('xff助手一号：正在加载…');
     tryBoot(false);
   }
 

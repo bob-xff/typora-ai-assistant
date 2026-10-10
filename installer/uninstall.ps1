@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 <#
-    Typora AI 学习助手 · 卸载脚本
+    xff助手一号 · 卸载脚本
     ------------------------------------------------------------------
     双击同目录的 uninstall.bat 即可（会自动请求管理员权限）。
 
@@ -31,7 +31,7 @@ function Pause-IfInteractive { if (-not $Silent) { Read-Host '按 Enter 关闭' 
 
 Write-Host ''
 Write-Host '  ==========================================================' -ForegroundColor Cyan
-Write-Host '        Typora AI 学习助手  ·  卸载' -ForegroundColor Cyan
+Write-Host '        xff助手一号  ·  卸载' -ForegroundColor Cyan
 Write-Host '  ==========================================================' -ForegroundColor Cyan
 Write-Host ''
 
