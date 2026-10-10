@@ -1,0 +1,24 @@
+# ---- 私密配置：含 API Key，绝不入库 ----
+bridge/config.json
+plugin/config.json
+**/config.json
+!plugin/config.example.json
+
+# ---- 构建产物 ----
+dist/
+*.zip
+
+# ---- 运行时/日志 ----
+*.log
+*.pid
+node_modules/
+
+# ---- 本地工具与编辑器 ----
+.workbuddy/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- 本地开发脚本（不上传） ----
+scripts/

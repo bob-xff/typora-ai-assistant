@@ -1,0 +1,15 @@
+# 统一换行符，避免不同系统上出现整文件 diff
+* text=auto eol=lf
+
+# Windows 批处理用 CRLF
+*.bat text eol=crlf
+
+# PowerShell 脚本含中文，必须是 UTF-8 with BOM；
+# 用 -text 声明为二进制属性，让 git 完全不碰它的编码和换行
+*.ps1 -text
+
+# 二进制
+*.png binary
+*.jpg binary
+*.zip binary
+*.ico binary

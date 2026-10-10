@@ -1,0 +1,11 @@
+{
+  "_comment": "这是配置模板。推荐直接在插件界面里配置（点输入框右侧的齿轮），此处留空即可。",
+  "provider": "deepseek",
+  "baseUrl": "https://api.deepseek.com",
+  "model": "deepseek-chat",
+  "apiKey": "",
+  "port": 8765,
+  "token": "",
+  "temperature": 0.7,
+  "maxContextChars": 12000
+}
