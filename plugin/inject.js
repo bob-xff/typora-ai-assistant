@@ -1,5 +1,5 @@
 /* ==========================================================================
-   xff助手一号 · 注入引导脚本 v2.4
+   xff助手一号 · 注入引导脚本 v2.5
    唯一需要写进 Typora 安装目录的文件。负责把界面加载起来：
 
    通道 A（可选增强）：本地桥接服务在跑 → 从它拉最新界面代码（支持热更新）
@@ -12,8 +12,8 @@
 (function () {
   'use strict';
 
-  if (window.__TYPORA_AI_INJECTED__ === '2.4') return;
-  window.__TYPORA_AI_INJECTED__ = '2.4';
+  if (window.__TYPORA_AI_INJECTED__ === '2.5') return;
+  window.__TYPORA_AI_INJECTED__ = '2.5';
 
   var PORT = 8765;
   var BASE = 'http://127.0.0.1:' + PORT;

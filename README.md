@@ -44,7 +44,7 @@ OpenAI 兼容服务的预设，在输入框左下角的下拉里直接切；API 
 
 ### 方式一：用安装包（推荐）
 
-1. 下载 Releases 里的 `typora-ai-assistant-v2.4.0.zip`，**解压**（不要直接在压缩包里运行）
+1. 下载 Releases 里的 `typora-ai-assistant-v2.5.0.zip`，**解压**（不要直接在压缩包里运行）
 2. 双击 `installer\install.bat`
 3. UAC 弹窗点「是」（要写 Typora 安装目录，必须管理员权限）
 4. 重启 Typora
@@ -74,6 +74,23 @@ OpenAI 兼容服务的预设，在输入框左下角的下拉里直接切；API 
 - **Typora**：实质要求是渲染进程暴露 `window.reqnode`；安装脚本会自动检测并提示
 - **Windows**：安装脚本是 PowerShell（macOS / Linux 可按方式二手动安装）
 - **Node.js**：不需要。插件跑在 Typora 自带的 Node 环境里
+
+### 内嵌浏览器版本（很容易踩的坑）
+
+插件的界面跑在 Typora 自己的渲染进程里，用的就是 Typora 内置的 Chromium，
+**不是**你系统里的 Chrome / Edge。Typora 1.8.3 内嵌的是 **Electron 1.8.3 → Chromium 59（2017 年）**，
+所以界面代码必须写得足够「老」：
+
+| 不要用 | 原因 | 本项目的替代做法 |
+| --- | --- | --- |
+| `inset: 0` | Chromium 87+ 才有 | 显式写 `top/right/bottom/left: 0` |
+| flex 容器的 `gap` | Chromium 84+ 才有 | `client.css` 末尾的「兼容层」用 `margin` 实现 |
+| grid 的 `gap` 简写 | Chromium 66+ 才有 | 用 `grid-gap`（Chromium 57+） |
+| `:focus-within` | Chromium 60+ 才有 | JS 给元素加 `.focus` 类 |
+| 箭头函数 / `?.` / `??` / 对象展开 | V8 太新 | 全部写 ES5，新 API 先做特性检测 |
+
+`client.css` 里所有间距都**只用 `margin` 和 `padding`**；改动样式后请用
+`docs/` 下的无头截图流程在「模拟旧内核」的 CSS 上回归一次，避免又踩回同一个坑。
 
 ---
 
@@ -215,9 +232,18 @@ node bridge/server.js
 
 # 打包
 powershell -ExecutionPolicy Bypass -File build-release.ps1
+
+# 提交前跑两个回归检查（都必须通过）
+node scripts/compat-check.js   # 扫描有没有用 Chromium 59 不认识的新语法
+node scripts/xss-probe.js      # 渲染层 XSS 回归，应输出「风险用例数: 0」
 ```
 
 改 `plugin/client.js` 后：走桥接模式刷新即可；直连模式需要重跑 `install.bat`。
+
+**为什么必须有 `compat-check.js`**：界面跑在 Typora 内嵌的 Chromium 59 里，
+而这台机器上的 Chrome / Edge 是新版 —— 本地看着好好的，进 Typora 就散架。
+改动界面后用「模拟旧内核」的 CSS（把所有新语法声明整条删掉）再截一次图对比，
+是现代内核发现不了问题的唯一可靠办法。
 
 ---
 

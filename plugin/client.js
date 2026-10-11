@@ -1,6 +1,12 @@
 /* ==========================================================================
-   xff助手一号 · 前端 v2.4
+   xff助手一号 · 前端 v2.5
    --------------------------------------------------------------------------
+   兼容性（重要）：目标是 Typora 1.8.3 自带的 Electron 1.8.3 / Chromium 59（2017）。
+   禁止使用该内核不认识的东西，否则界面会「错乱」：
+     · CSS 不要用 inset 简写、flex 容器的 gap、grid 的 gap 简写（用 grid-gap）、
+       :focus-within、backdrop-filter、aspect-ratio；
+     · JS 不要用箭头函数 / 可选链 / ?? / Object spread，新 API 一律先特性检测。
+   间距统一由 client.css 末尾的「Chromium 59 兼容层」用 margin 实现。
    设计：清爽白底 + 大留白 + 大圆角输入容器；对话 / 智能体 / 快捷 三模式；
         输入区内置「模型切换」下拉与「配置」面板，API Key 只存在本机。
    运行：由 plugin/inject.js 注入到 Typora 的 window.html。
@@ -15,7 +21,7 @@
   if (window.__TYPORA_AI_BRIDGE_V3__) return;
   window.__TYPORA_AI_BRIDGE_V3__ = true;
 
-  var VERSION = '2.4';
+  var VERSION = '2.5';
   var PORT = window.__AI_BRIDGE_PORT__ || 8765;
   var TOKEN = window.__AI_BRIDGE_TOKEN__ || '';
   var BASE = 'http://127.0.0.1:' + PORT;
@@ -1176,6 +1182,11 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onPrimaryAction(); }
     });
     composerInput.addEventListener('input', autoGrow);
+
+    // 兼容 Chromium 59：内核没有 :focus-within，用 class 模拟输入框聚焦高亮
+    var boxEl = $('tyai-box');
+    composerInput.addEventListener('focus', function () { boxEl.classList.add('focus'); });
+    composerInput.addEventListener('blur', function () { boxEl.classList.remove('focus'); });
 
     // 模型 / 配置
     $('tyai-model-pill').addEventListener('click', function (e) { e.stopPropagation(); toggleModelPop(); });
