@@ -48,6 +48,8 @@
     quiz: '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.6a2.5 2.5 0 1 1 3.3 2.3c-.6.3-.9.8-.9 1.4v.3"/><circle cx="12" cy="16.8" r=".9" fill="currentColor" stroke="none"/>',
     key: '<circle cx="8" cy="15" r="3.5"/><path d="M10.5 12.5 20 3M16.5 6.5 19 9M14.5 8.5 17 11"/>',
     model: '<circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 7.5 10 10M17 7.5 14 10M7 16.5 10 14M17 16.5 14 14"/>',
+    chevron: '<path d="M9 6l6 6-6 6"/>',
+    sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
   };
 
   function icon(name, size) {
@@ -156,6 +158,7 @@
 
   var root, ball, panel, statusEl, bubble, composerInput;
   var els = {};
+  var sheetProvider = '';   // 设置抽屉里当前选中的服务商
 
   /* ======================================================================
    * 工具
@@ -976,9 +979,9 @@
 
   function homeHTML() {
     var cards = [
-      { tab: 'chat', icon: 'chat', title: '对话', desc: '选中正文随时提问，多轮记住上下文' },
-      { tab: 'agent', icon: 'spark', title: '智能体', desc: '拆解学习任务，多步执行再汇总' },
-      { tab: 'quick', icon: 'bolt', title: '快捷', desc: '解释 / 翻译 / 说人话 / 总结…' },
+      { tab: 'chat', icon: 'chat', title: 'Chat', desc: '选中正文随时提问，多轮记住上下文' },
+      { tab: 'agent', icon: 'spark', title: 'Agent', desc: '拆解学习任务，多步执行再汇总' },
+      { tab: 'quick', icon: 'bolt', title: 'Quick', desc: '解释 / 翻译 / 说人话 / 总结…' },
     ];
     return '<div class="tyai-home">' +
       '<h1 class="tyai-hello">你好，<br>我今天能帮你什么？</h1>' +
@@ -1012,9 +1015,9 @@
       '  </div>' +
 
       '  <div class="tyai-seg" id="tyai-seg">' +
-      '    <button data-tab="chat" class="on">对话</button>' +
-      '    <button data-tab="agent">智能体</button>' +
-      '    <button data-tab="quick">快捷</button>' +
+      '    <button data-tab="chat" class="on">Chat</button>' +
+      '    <button data-tab="agent">Agent</button>' +
+      '    <button data-tab="quick">Quick</button>' +
       '  </div>' +
 
       '  <div class="tyai-body">' +
@@ -1081,13 +1084,16 @@
       '    <div class="tyai-sheet-panel">' +
       '      <div class="tyai-sheet-head"><b>模型与配置</b><span class="tyai-x" id="tyai-sheet-close">' + icon('x', 15) + '</span></div>' +
       '      <div class="tyai-sheet-body tyai-scroll">' +
-      '        <label class="tyai-field"><span>服务商</span><select id="tyai-f-provider"></select></label>' +
-      '        <label class="tyai-field"><span>Base URL</span><input id="tyai-f-baseurl" spellcheck="false" placeholder="https://api.deepseek.com"></label>' +
-      '        <label class="tyai-field"><span>模型</span><input id="tyai-f-model" spellcheck="false" list="tyai-model-list" placeholder="deepseek-chat"><datalist id="tyai-model-list"></datalist></label>' +
-      '        <label class="tyai-field"><span>API Key</span><span class="tyai-keywrap"><input id="tyai-f-key" type="password" spellcheck="false" placeholder="sk-..."><button class="tyai-icobtn" id="tyai-f-eye" title="显示/隐藏">' + icon('eye', 15) + '</button></span></label>' +
-      '        <label class="tyai-field"><span>温度 <i id="tyai-f-tempv">0.7</i></span><input id="tyai-f-temp" type="range" min="0" max="1.5" step="0.1"></label>' +
+      '        <div class="tyai-field"><span>服务商</span>' +
+      '          <div class="tyai-opts" id="tyai-f-provider"></div>' +
+      '        </div>' +
+      '        <label class="tyai-field"><span>接口地址 Base URL</span><input id="tyai-f-baseurl" type="text" spellcheck="false" placeholder="https://api.deepseek.com"></label>' +
+      '        <label class="tyai-field"><span>模型名</span><input id="tyai-f-model" type="text" spellcheck="false" placeholder="deepseek-chat"></label>' +
+      '        <div class="tyai-suggests" id="tyai-model-suggest"></div>' +
+      '        <label class="tyai-field"><span>API Key</span><span class="tyai-keywrap"><input id="tyai-f-key" type="password" spellcheck="false" placeholder="sk-..."><button class="tyai-icobtn" id="tyai-f-eye" title="显示 / 隐藏">' + icon('eye', 15) + '</button></span></label>' +
+      '        <div class="tyai-field"><span>温度 <i id="tyai-f-tempv">0.7</i></span><input id="tyai-f-temp" type="range" min="0" max="1.5" step="0.1"></div>' +
       '        <label class="tyai-field"><span>上下文上限（字符）</span><input id="tyai-f-maxctx" type="number" min="1000" max="200000" step="1000"></label>' +
-      '        <p class="tyai-note">Key 只保存在本机 Typora 的本地存储里，不会上传到任何服务器；换一台电脑需要重新填一次。</p>' +
+      '        <p class="tyai-note">Key 只保存在本机，不会上传；换一台电脑需重新填写。</p>' +
       '        <div class="tyai-testbox" id="tyai-testbox"></div>' +
       '      </div>' +
       '      <div class="tyai-sheet-foot">' +
@@ -1180,7 +1186,6 @@
       el.type = pw ? 'text' : 'password';
       this.innerHTML = icon(pw ? 'eyeoff' : 'eye', 15);
     });
-    $('tyai-f-provider').addEventListener('change', onProviderChange);
     $('tyai-f-temp').addEventListener('input', function () { $('tyai-f-tempv').textContent = this.value; });
     $('tyai-f-test').addEventListener('click', doTestConnection);
     $('tyai-f-save').addEventListener('click', saveSheet);
@@ -1259,27 +1264,73 @@
   }
 
   function renderModelPop() {
-    var html = '<div class="tyai-pop-title">选择模型</div>';
-    PROVIDERS.forEach(function (p) {
-      if (!p.models.length) return;
-      html += '<div class="tyai-pop-group">' + esc(p.name) + '</div>';
-      p.models.forEach(function (m) {
+    var cur = providerOf(CFG.provider);
+    var html = '<div class="tyai-pop-title">模型</div>';
+
+    // —— 当前服务商（默认只展示它，不再一上来铺满所有厂商）
+    html += '<div class="tyai-pop-group">' + esc(cur.name) + '</div>';
+    var mine = cur.models.slice();
+    if (!mine.length && CFG.model) mine = [CFG.model];
+    if (!mine.length) {
+      html += '<div class="tyai-pop-empty">还没有可选项，点最下面的「配置」填一次即可。</div>';
+    } else {
+      mine.forEach(function (m) {
         var on = (CFG.model === m) ? ' on' : '';
-        html += '<button class="tyai-pop-item' + on + '" data-model="' + esc(m) + '" data-prop="' + p.id + '" data-base="' + esc(p.baseUrl) + '">' +
+        html += '<button class="tyai-pop-item' + on + '" data-model="' + esc(m) + '" data-prop="' + cur.id + '" data-base="' + esc(cur.baseUrl) + '">' +
           '<span>' + esc(m) + '</span>' + (on ? icon('check', 14) : '') + '</button>';
       });
-    });
+    }
+
+    // —— 其他服务商：折叠起来，需要时才展开
+    var others = PROVIDERS.filter(function (p) { return p.id !== cur.id; });
+    if (others.length) {
+      html += '<div class="tyai-pop-sep"></div>' +
+        '<button class="tyai-pop-toggle" id="tyai-pop-toggle">' + icon('sliders', 15) +
+        '<span>换用其他服务商</span><span class="tyai-pop-caret">' + icon('chevron', 14) + '</span></button>' +
+        '<div class="tyai-pop-others" id="tyai-pop-others" hidden>';
+      others.forEach(function (p) {
+        html += '<div class="tyai-pop-group">' + esc(p.name) + '</div>';
+        if (p.models.length) {
+          p.models.forEach(function (m) {
+            html += '<button class="tyai-pop-item" data-model="' + esc(m) + '" data-prop="' + p.id + '" data-base="' + esc(p.baseUrl) + '">' +
+              '<span>' + esc(m) + '</span></button>';
+          });
+        } else {
+          html += '<button class="tyai-pop-item" data-cfg-provider="' + p.id + '">' +
+            '<span>去填写接口地址…</span>' + icon('chevron', 14) + '</button>';
+        }
+      });
+      html += '</div>';
+    }
+
     html += '<div class="tyai-pop-sep"></div>' +
       '<button class="tyai-pop-item" data-open-cfg="1">' + icon('gear', 15) + '<span>配置模型与 API Key</span></button>';
 
     els.popModel.innerHTML = html;
+
+    var toggle = $('tyai-pop-toggle');
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        var box = $('tyai-pop-others');
+        box.hidden = !box.hidden;
+        toggle.classList.toggle('open', !box.hidden);
+      });
+    }
+
     els.popModel.querySelectorAll('.tyai-pop-item').forEach(function (btn) {
       btn.addEventListener('click', function () {
         if (btn.getAttribute('data-open-cfg')) { els.popModel.hidden = true; openSheet(); return; }
-        CFG.model = btn.getAttribute('data-model');
+        var preset = btn.getAttribute('data-cfg-provider');
+        if (preset) { els.popModel.hidden = true; openSheet(preset); return; }
+        var model = btn.getAttribute('data-model');
+        if (!model) return;                        // 兜底：没有模型名的按钮不参与切换
+        CFG.model = model;
         var prop = btn.getAttribute('data-prop');
         var base = btn.getAttribute('data-base');
-        if (prop && providerOf(prop).baseUrl) { CFG.provider = prop; CFG.baseUrl = base; }
+        if (prop) {
+          CFG.provider = prop;
+          if (base) CFG.baseUrl = base;
+        }
         saveCfg();
         syncModelUI();
         updateStatus();
@@ -1299,15 +1350,13 @@
 
   /* ---------------------------- 设置抽屉 ---------------------------- */
 
-  function openSheet() {
+  function openSheet(presetProvider) {
     els.popModel.hidden = true;
     els.popSess.hidden = true;
 
-    var sel = $('tyai-f-provider');
-    sel.innerHTML = PROVIDERS.map(function (p) {
-      return '<option value="' + p.id + '">' + esc(p.name) + '</option>';
-    }).join('');
-    sel.value = providerOf(CFG.provider).id;
+    sheetProvider = presetProvider || CFG.provider || 'custom';
+    renderProviderOpts();
+    refreshModelSuggest();
 
     $('tyai-f-baseurl').value = CFG.baseUrl || '';
     $('tyai-f-model').value = CFG.model || '';
@@ -1318,29 +1367,51 @@
     $('tyai-f-tempv').textContent = Number(CFG.temperature) || 0.7;
     $('tyai-f-maxctx').value = Number(CFG.maxContextChars) || 12000;
     $('tyai-testbox').innerHTML = '';
-    refreshModelList();
     els.sheet.hidden = false;
   }
 
   function closeSheet() { els.sheet.hidden = true; }
 
-  function refreshModelList() {
-    var p = providerOf($('tyai-f-provider').value);
-    $('tyai-model-list').innerHTML = p.models.map(function (m) { return '<option value="' + esc(m) + '">'; }).join('');
+  // 服务商：按钮组（不用原生 select —— 在 Electron/Typora 下样式不可控）
+  function renderProviderOpts() {
+    var box = $('tyai-f-provider');
+    box.innerHTML = PROVIDERS.map(function (p) {
+      var on = (p.id === sheetProvider) ? ' on' : '';
+      return '<button type="button" class="tyai-opt' + on + '" data-provider="' + p.id + '">' + esc(p.name) + '</button>';
+    }).join('');
+    box.querySelectorAll('.tyai-opt').forEach(function (b) {
+      b.addEventListener('click', function () { selectProvider(b.getAttribute('data-provider')); });
+    });
   }
 
-  function onProviderChange() {
-    var p = providerOf(this.value);
+  function selectProvider(id) {
+    sheetProvider = id;
+    var p = providerOf(id);
     if (p.baseUrl) $('tyai-f-baseurl').value = p.baseUrl;
-    if (p.models.length && !p.models.some(function (m) { return m === $('tyai-f-model').value; })) {
+    var cur = $('tyai-f-model').value;
+    if (p.models.length && !p.models.some(function (m) { return m === cur; })) {
       $('tyai-f-model').value = p.models[0];
     }
-    refreshModelList();
+    renderProviderOpts();
+    refreshModelSuggest();
+  }
+
+  // 模型：输入框 + 常用模型快捷 chips（不用原生 datalist）
+  function refreshModelSuggest() {
+    var box = $('tyai-model-suggest');
+    var p = providerOf(sheetProvider);
+    if (!p.models.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<span class="tyai-sug-hint">常用</span>' + p.models.map(function (m) {
+      return '<button type="button" class="tyai-sug" data-model="' + esc(m) + '">' + esc(m) + '</button>';
+    }).join('');
+    box.querySelectorAll('.tyai-sug').forEach(function (b) {
+      b.addEventListener('click', function () { $('tyai-f-model').value = b.getAttribute('data-model'); });
+    });
   }
 
   function sheetCfg() {
     return {
-      provider: $('tyai-f-provider').value,
+      provider: sheetProvider || 'custom',
       baseUrl: String($('tyai-f-baseurl').value || '').trim(),
       model: String($('tyai-f-model').value || '').trim(),
       apiKey: String($('tyai-f-key').value || '').trim(),

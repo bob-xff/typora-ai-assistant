@@ -460,6 +460,7 @@ const DEBUG_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8
         else if (q.task) api.agent(q.task);
         if (q.pop === 'model') api.modelPop();
         else if (q.pop === 'sheet') api.sheet();
+        if (q.others) { var _t = document.getElementById('tyai-pop-toggle'); if (_t) _t.click(); }
       }, 300);
     }, 500);
   });

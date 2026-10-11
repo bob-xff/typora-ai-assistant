@@ -146,7 +146,10 @@
   align-items: center;
   gap: 5px;
   white-space: nowrap;
-  max-width: 160px;
+  max-width: 168px;
+  padding: 3px 9px 3px 8px;
+  border-radius: 999px;
+  background: var(--soft);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -228,7 +231,7 @@
   background: var(--surface);
   color: var(--accent-ink);
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(90, 30, 50, 0.1);
+  box-shadow: 0 1px 3px rgba(90, 30, 50, 0.1), inset 0 0 0 1px var(--accent-line);
 }
 
 /* ---------- 视图容器 ---------- */
@@ -254,17 +257,17 @@
 #tyai-root .tyai-home { padding: 12px 14px 8px; }
 
 #tyai-root .tyai-hello {
-  margin: 10px 0 18px;
-  font-size: 24px;
-  line-height: 1.32;
+  margin: 14px 0 20px;
+  font-size: 25px;
+  line-height: 1.3;
   font-weight: 700;
-  letter-spacing: -0.4px;
+  letter-spacing: -0.5px;
 }
 
 #tyai-root .tyai-card {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
   width: 100%;
   text-align: left;
   border: 1px solid var(--line);
@@ -272,13 +275,19 @@
   color: var(--text);
   font: inherit;
   padding: 13px 14px;
-  border-radius: 14px;
+  border-radius: 15px;
   margin-bottom: 9px;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 1px 2px rgba(90, 30, 50, 0.03);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-#tyai-root .tyai-card:hover { background: var(--accent-soft); border-color: var(--accent-line); transform: translateY(-1px); }
+#tyai-root .tyai-card:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(224, 86, 125, 0.12);
+}
 
 #tyai-root .tyai-card-ic {
   flex: none;
@@ -331,7 +340,8 @@
 #tyai-root .tyai-msg-user .tyai-msg-body { display: flex; justify-content: flex-end; }
 #tyai-root .tyai-msg-user .tyai-msg-text {
   background: var(--accent-soft);
-  border-radius: 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: 13px;
   padding: 8px 12px;
   max-width: 86%;
 }
@@ -490,14 +500,20 @@
   color: var(--text);
   font: inherit;
   font-size: 12.5px;
-  padding: 11px 12px;
-  border-radius: 13px;
+  padding: 12px;
+  border-radius: 14px;
   cursor: pointer;
   text-align: left;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 1px 2px rgba(90, 30, 50, 0.03);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-#tyai-root .tyai-scene:hover { background: var(--accent-soft); border-color: var(--accent-line); transform: translateY(-1px); }
+#tyai-root .tyai-scene:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(224, 86, 125, 0.12);
+}
 
 #tyai-root .tyai-scene-ic {
   width: 26px;
@@ -674,13 +690,14 @@
   right: 14px;
   bottom: 96px;
   z-index: 20;
-  max-height: 340px;
+  max-height: 360px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
-  box-shadow: 0 18px 48px rgba(90, 30, 50, 0.18);
-  padding: 6px;
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(90, 30, 50, 0.2);
+  padding: 7px;
   animation: tyai-pop 0.14s ease;
 }
 
@@ -736,6 +753,31 @@
 #tyai-root .tyai-pop-item > span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #tyai-root .tyai-pop-item.on { color: var(--accent-ink); font-weight: 600; }
 
+#tyai-root .tyai-pop-empty { font-size: 12px; color: var(--muted); padding: 4px 10px 10px; line-height: 1.6; }
+
+#tyai-root .tyai-pop-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+#tyai-root .tyai-pop-toggle:hover { background: var(--accent-soft); }
+#tyai-root .tyai-pop-toggle > span:first-of-type { flex: 1; }
+#tyai-root .tyai-pop-toggle .tyai-pop-caret { display: inline-flex; color: var(--muted); transition: transform 0.18s ease; }
+#tyai-root .tyai-pop-toggle.open .tyai-pop-caret { transform: rotate(90deg); }
+#tyai-root .tyai-pop-others[hidden] { display: none; }
+
 #tyai-root .tyai-pop-sep { height: 1px; background: var(--line); margin: 6px 8px; }
 
 #tyai-root .tyai-sess-list { max-height: 220px; overflow-y: auto; }
@@ -779,9 +821,9 @@
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-top-left-radius: 18px;
-  border-top-right-radius: 18px;
-  box-shadow: 0 -12px 40px rgba(90, 30, 50, 0.2);
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  box-shadow: 0 -12px 44px rgba(90, 30, 50, 0.22);
   animation: tyai-slide 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -811,7 +853,6 @@
 }
 #tyai-root .tyai-field > span i { font-style: normal; color: var(--accent-ink); font-weight: 600; }
 
-#tyai-root .tyai-field select,
 #tyai-root .tyai-field input[type="text"],
 #tyai-root .tyai-field input[type="password"],
 #tyai-root .tyai-field input[type="number"],
@@ -820,25 +861,107 @@
   box-sizing: border-box;
   font: inherit;
   font-size: 12.5px;
+  line-height: 1.4;
   color: var(--text);
   background: var(--soft);
   border: 1px solid transparent;
   border-radius: 11px;
   padding: 9px 11px;
   outline: none;
+  -webkit-appearance: none;
+  appearance: none;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-#tyai-root .tyai-field select:focus,
 #tyai-root .tyai-field input:focus { background: var(--surface); border-color: var(--accent); }
 
-#tyai-root .tyai-field input[type="range"] { width: 100%; accent-color: var(--accent); }
+/* 温度：自绘轨道与滑块，避免各 Electron 版本默认样式不一致 */
+#tyai-root .tyai-field input[type="range"] {
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+#tyai-root .tyai-field input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--soft-2);
+}
+
+#tyai-root .tyai-field input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  box-shadow: 0 1px 4px rgba(224, 86, 125, 0.4);
+}
 
 #tyai-root .tyai-keywrap { display: flex; align-items: center; gap: 4px; }
 #tyai-root .tyai-keywrap input { flex: 1; }
 #tyai-root .tyai-keywrap .tyai-icobtn { background: var(--soft); }
 
+/* 服务商：按钮组（替代原生 select） */
+#tyai-root .tyai-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+
+#tyai-root .tyai-opt {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+#tyai-root .tyai-opt:hover { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
+
+#tyai-root .tyai-opt.on {
+  background: var(--accent-soft-2);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* 常用模型：快捷 chips（替代原生 datalist） */
+#tyai-root .tyai-suggests {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: -6px 0 13px;
+}
+
+#tyai-root .tyai-suggests:empty { display: none; }
+#tyai-root .tyai-sug-hint { font-size: 11px; color: var(--muted); }
+
+#tyai-root .tyai-sug {
+  border: 1px dashed var(--accent-line);
+  background: transparent;
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+#tyai-root .tyai-sug:hover { background: var(--accent-soft); border-style: solid; }
+
 #tyai-root .tyai-note { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 4px 0 0; }
+
+#tyai-root .tyai-testbox:empty { display: none; }
 
 #tyai-root .tyai-testnote {
   font-size: 11.5px;
