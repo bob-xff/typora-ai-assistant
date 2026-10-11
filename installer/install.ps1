@@ -25,7 +25,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$VERSION      = '2.3'
+$VERSION      = '2.4'
 $PLUGIN_NAME  = 'typora-ai-bridge'
 
 function Say   { param($m, $c) Write-Host "  $m" -ForegroundColor $(if ($c) { $c } else { 'Gray' }) }

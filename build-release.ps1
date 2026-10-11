@@ -51,7 +51,7 @@ foreach ($f in @('inject.js', 'client.js', 'client.css', 'config.example.json'))
 }
 
 # 文档
-foreach ($f in @('README.md', 'VERSION', 'LICENSE')) {
+foreach ($f in @('README.md', 'SECURITY.md', 'VERSION', 'LICENSE')) {
     $src = Join-Path $PSScriptRoot $f
     if (Test-Path $src) {
         Copy-Item $src (Join-Path $STAGE $f) -Force

@@ -199,13 +199,20 @@
    * Markdown 渲染（极简）
    * ==================================================================== */
 
+  // 链接协议白名单：模型输出不可信，拦截 javascript:/data:/vbscript: 等可执行协议
+  function safeHref(u) {
+    return /^(?:https?:\/\/|mailto:|tel:|\/|\.\/|\.\.\/|#)/i.test(String(u)) ? u : '#';
+  }
+
   function inline(s) {
     return s
       .replace(/`([^`]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
       .replace(/~~([^~]+)~~/g, '<del>$1</del>')
-      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (m, text, url) {
+        return '<a href="' + safeHref(url) + '" target="_blank" rel="noreferrer noopener">' + text + '</a>';
+      });
   }
 
   function splitRow(line) {
@@ -220,7 +227,11 @@
     text = text.replace(/```[^\n]*\n?([\s\S]*?)```/g, function (m, code) {
       return '\n' + slot('<pre><code>' + esc(code.replace(/\n$/, '')) + '</code></pre>') + '\n';
     });
-    text = text.replace(/<\/?(?:details|summary)[^>]*>/gi, function (m) { return slot(m.toLowerCase()); });
+    // 仅保留 details/summary 的开合标签本身，剥离全部属性（防 ontoggle 等事件属性注入）
+    text = text.replace(/<\/?(details|summary)[^>]*>/gi, function (m, name) {
+      var closing = m.charAt(1) === '/';
+      return slot((closing ? '</' : '<') + name.toLowerCase() + '>');
+    });
     text = esc(text);
 
     var lines = text.split('\n');

@@ -20,5 +20,6 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# ---- 本地开发脚本（不上传） ----
-scripts/
+# ---- 本地开发脚本（不上传），保留安全回归测试 ----
+scripts/*
+!scripts/xss-probe.js
