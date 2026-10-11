@@ -228,6 +228,8 @@ node bridge/server.js
 # 浏览器打开 http://127.0.0.1:8765
 #   加 ?tab=quick&run=explain  直接跑一次「解释」
 #   加 ?tab=chat&pop=model     直接展开模型下拉
+#   加 ?others=1               展开「换用其他服务商」
+#   加 ?click=%23tyai-cfg-btn  真实点击某个元素（验证点击处理器接上了没）
 #   加 #open                   打开面板
 
 # 打包

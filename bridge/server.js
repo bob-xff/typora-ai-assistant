@@ -438,6 +438,7 @@ const DEBUG_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8
 <script src="/client.js"></script>
 <script>
 // 演示钩子：?tab=quick&run=explain / ?tab=chat&say=你好 / ?tab=agent&task=总结全文
+//          ?pop=model|sheet / ?others=1 / ?click=.tyai-some-selector（真实点击路径）
 (function () {
   var q = {};
   location.search.replace(/([^?&=]+)=([^&]*)/g, function (_, k, v) { q[k] = decodeURIComponent(v); return ''; });
@@ -461,6 +462,8 @@ const DEBUG_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8
         if (q.pop === 'model') api.modelPop();
         else if (q.pop === 'sheet') api.sheet();
         if (q.others) { var _t = document.getElementById('tyai-pop-toggle'); if (_t) _t.click(); }
+        // 真实点击路径：验证按钮的点击处理器真的接上了（例如输入框右侧的齿轮）
+        if (q.click) { var _c = document.querySelector(q.click); if (_c) _c.click(); else console.warn('click: 找不到', q.click); }
       }, 300);
     }, 500);
   });
