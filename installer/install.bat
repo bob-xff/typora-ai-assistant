@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  xff Assistant No.1 - Installer (v2.4)
+rem  xff Assistant No.1 - Installer (v2.6)
 rem  Double-click this file. It will ask for admin rights.
 rem  (Keep this file ASCII-only: cmd.exe does not handle
 rem   UTF-8 without BOM + Chinese text reliably.)

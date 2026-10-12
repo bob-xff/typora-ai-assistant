@@ -237,7 +237,11 @@ function initSSE(res) {
     send,
     done,
     isClosed: () => closed,
-    abortUpstream: (up) => { if (closed && up && up.destroy) up.destroy(); },
+    // 客户端断开时销毁上游连接，避免后台继续烧 token
+    abortUpstream: (up) => {
+      if (!up || !up.destroy) return;
+      res.on('close', () => { try { up.destroy(); } catch (_) {} });
+    },
   };
 }
 
@@ -286,9 +290,10 @@ async function handleAsk(req, res) {
 
   const scene = SCENES[body.scene] ? body.scene : 'ask';
   const selected = String(body.text || '');
+  const question = String(body.question || '').trim();
   const doc = String((body.context && body.context.docText) || '').slice(0, CONFIG.maxContextChars);
 
-  if (scene !== 'ask' && !needInput(res, Boolean(selected.trim() || doc.trim()))) return;
+  if (!needInput(res, Boolean(selected.trim() || doc.trim() || question))) return;
 
   const messages = buildMessages(scene, {
     text: selected,
@@ -464,6 +469,11 @@ const DEBUG_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8
         if (q.others) { var _t = document.getElementById('tyai-pop-toggle'); if (_t) _t.click(); }
         // 真实点击路径：验证按钮的点击处理器真的接上了（例如输入框右侧的齿轮）
         if (q.click) { var _c = document.querySelector(q.click); if (_c) _c.click(); else console.warn('click: 找不到', q.click); }
+        // 复现用户路径：选中文字 → 浮窗弹出 → 点浮窗里的场景按钮（验证侧栏会自动跳出）
+        if (q.bubble) {
+          var _b = document.querySelector('#tyai-bubble button[data-scene="' + q.bubble + '"]');
+          if (_b) _b.click(); else console.warn('bubble: 浮窗里找不到', q.bubble);
+        }
       }, 300);
     }, 500);
   });
@@ -480,7 +490,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         ok: true,
         service: 'typora-ai-bridge',
-        version: '2.0',
+        version: '2.6',
         provider: CONFIG.provider,
         model: CONFIG.model,
         baseUrl: CONFIG.baseUrl,
@@ -490,6 +500,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && pathname === '/client.js') {
+      // 该响应内嵌访问令牌，只放行本机来源（Node 请求无 Origin，调试页 Origin 是本机）
+      if (!originAllowed(req)) return sendJson(res, 403, { error: '拒绝跨站来源的调用' });
       if (!fs.existsSync(CLIENT_JS)) return sendJson(res, 404, { error: 'client.js 不存在' });
       // 把端口和访问令牌注入到前端代码里，省去额外请求
       const prelude =
@@ -507,6 +519,7 @@ const server = http.createServer(async (req, res) => {
       return sendFile(res, CLIENT_CSS, 'text/css');
     }
     if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
+      if (!originAllowed(req)) return sendJson(res, 403, { error: '拒绝跨站来源的调用' });
       const body = DEBUG_PAGE;
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
@@ -516,7 +529,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && pathname === '/ask') {
-      if (!guard(req, res, true)) return;
+      if (!sseGuard(req, res)) return;
       return await handleAsk(req, res);
     }
     if (req.method === 'POST' && pathname === '/chat') {

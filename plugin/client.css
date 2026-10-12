@@ -1,5 +1,5 @@
 /* ==========================================================================
-   xff助手一号 · 界面样式 v2.4
+   xff助手一号 · 界面样式 v2.6
    设计语言：以「淡粉」为主色的清爽纸感界面 —— 纯色、零渐变；
             白色面板 + 粉色柔面卡片、大圆角、极细分割线、
             玫瑰粉作强调与主按钮；深浅主题跟随 Typora。
@@ -1108,6 +1108,31 @@
 #tyai-root[data-theme="dark"] .tyai-testnote.is-ok { color: #6fd8ab; }
 #tyai-root[data-theme="dark"] .tyai-testnote.is-err { color: #fca5a5; }
 #tyai-root[data-theme="dark"] .tyai-ball svg { border-radius: 50%; }
+
+/* ==========================================================================
+   现代内核增强层（仅探测到 Chromium 87+ 时生效）
+   --------------------------------------------------------------------------
+   运行时 detectKernel() 发现新内核会给 #tyai-root 加 .tyai-k-modern；
+   老内核没有这个类，下面这些观感增强会被整体跳过，退回纯色扁平样式 ——
+   功能与布局完全一致，只是少了毛玻璃这一层质感。
+   注意：只能放「不支持就被安全忽略」的属性；凡是会改变布局的写法
+   （inset / gap / :focus-within 等）一律留在基线里，不进这一层。
+   ========================================================================== */
+
+#tyai-root.tyai-k-modern .tyai-mask {
+  -webkit-backdrop-filter: blur(7px) saturate(1.15);
+  backdrop-filter: blur(7px) saturate(1.15);
+}
+
+#tyai-root.tyai-k-modern .tyai-bubble {
+  background: rgba(255, 255, 255, 0.84);
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  backdrop-filter: blur(14px) saturate(1.5);
+}
+
+#tyai-root.tyai-k-modern[data-theme="dark"] .tyai-bubble {
+  background: rgba(29, 24, 27, 0.8);
+}
 
 /* ==========================================================================
    Chromium 59 兼容层

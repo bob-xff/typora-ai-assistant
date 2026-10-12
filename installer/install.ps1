@@ -1,17 +1,21 @@
 ﻿#Requires -Version 5.1
 <#
-    xff助手一号 · 安装脚本 v2.5
+    xff助手一号 · 安装脚本 v2.6
     ------------------------------------------------------------------
     双击同目录的 install.bat 即可（会自动请求管理员权限）。
 
     做这几件事：
       1. 自动定位 Typora 安装目录（Program Files / Program Files(x86) / 用户目录）
-      2. 兼容性检查：确认 window.html 里有 Node 能力入口（reqnode）
-      3. 备份 window.html → window.html.bak（只在第一次备份）
-      4. 部署插件前端（inject.js / client.js / client.css）到
+      2. 探测目标机器的 Typora 内嵌浏览器内核版本（Chromium xx），
+        据此给出兼容性提示，并把版本写进 config.json 的 kernel 字段
+        （插件前端 UA 认不出内核时用它兜底 —— 同一份安装包会自动适配
+         老机器走「兼容形态」、新机器走「完整形态」）
+      3. 兼容性检查：确认 window.html 里有 Node 能力入口（reqnode）
+      4. 备份 window.html → window.html.bak（只在第一次备份）
+      5. 部署插件前端（inject.js / client.js / client.css）到
          <Typora>\resources\app\typora-ai-bridge\
-      5. 生成 config.json 配置模板（已存在则保留，不覆盖）
-      6. 在 window.html 的 </body> 前注入一行 <script>
+      6. 生成 config.json 配置模板（已存在则保留，不覆盖）
+      7. 在 window.html 的 </body> 前注入一行 <script>
 
     可重复运行：已注入时只更新插件文件，不会重复插入。
     Typora 升级后会覆盖 window.html，重跑一次本脚本即可恢复。
@@ -25,7 +29,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$VERSION      = '2.5'
+$VERSION      = '2.6'
 $PLUGIN_NAME  = 'typora-ai-bridge'
 
 function Say   { param($m, $c) Write-Host "  $m" -ForegroundColor $(if ($c) { $c } else { 'Gray' }) }
@@ -158,6 +162,42 @@ try {
     }
 } catch {}
 
+# ---------------------------------------------------------------- 内嵌内核探测
+# 从 Typora.exe 的二进制里找 Chrome/xx / Electron/x.x.z 版本串。
+# 插件前端会再做一次 UA 探测，这里写进 config.json 只是兜底提示。
+
+function Get-TyporaKernel {
+    param([string]$ExePath)
+    $r = @{ Chrome = 0; Electron = '' }
+    if (-not (Test-Path $ExePath)) { return $r }
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($ExePath)
+        $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
+        $m = [regex]::Match($text, 'Chrome/(\d+)')
+        if ($m.Success) { $r.Chrome = [int]$m.Groups[1].Value }
+        $m = [regex]::Match($text, 'Electron/([\d.]+)')
+        if ($m.Success) { $r.Electron = $m.Groups[1].Value }
+    } catch {}
+    return $r
+}
+
+$kernel = Get-TyporaKernel -ExePath (Join-Path $typoraRoot 'Typora.exe')
+if ($kernel.Chrome -gt 0) {
+    $kstr = "Chromium $($kernel.Chrome)"
+    if ($kernel.Electron) { $kstr += " · Electron $($kernel.Electron)" }
+    Ok "内嵌浏览器内核：$kstr"
+    if ($kernel.Chrome -lt 60) {
+        Say '这个内核比较老（2017 年的 Chromium 59 级别）。'
+        Say '插件会自动走「兼容形态」：功能完整，观感比新机器略朴素，属正常现象。'
+    } elseif ($kernel.Chrome -lt 87) {
+        Say '内核中等。同样走「兼容形态」，功能不受影响。'
+    } else {
+        Ok '内核较新 —— 完整形态（毛玻璃等增强效果可用）。'
+    }
+} else {
+    Warn2 '没能读出内嵌内核版本（不影响安装；插件会按保守模式自适应）。'
+}
+
 # ---------------------------------------------------------------- 兼容性检查
 
 $htmlText = [System.IO.File]::ReadAllText($windowHtml, [System.Text.Encoding]::UTF8)
@@ -216,6 +256,20 @@ if (Test-Path $cfgDst) {
     Say '已生成空白配置模板 config.json'
 }
 
+# 把探测到的内核版本合并进 config.json（只动 kernel 一个字段，不碰其它配置；
+# 这是本机文件，不随安装包分发）。前端 UA 探测失败时用它兜底。
+if ($kernel.Chrome -gt 0 -and (Test-Path $cfgDst)) {
+    try {
+        $cfgObj = Get-Content -LiteralPath $cfgDst -Raw -Encoding UTF8 | ConvertFrom-Json
+        $cfgObj | Add-Member -Force -NotePropertyName 'kernel' -NotePropertyValue $kernel.Chrome
+        $json = $cfgObj | ConvertTo-Json -Depth 6
+        [System.IO.File]::WriteAllText($cfgDst, $json, (New-Object System.Text.UTF8Encoding($false)))
+        Say "已记录内核版本到 config.json（kernel = $($kernel.Chrome)，前端识别不了 UA 时兜底）"
+    } catch {
+        Warn2 "内核版本写入 config.json 失败（不影响使用）：$($_.Exception.Message)"
+    }
+}
+
 # ---------------------------------------------------------------- 注入
 
 $marker = "$PLUGIN_NAME/inject.js"
@@ -256,6 +310,7 @@ Write-Host '   3) 点输入框右侧的齿轮，填入你自己的 API Key' -For
 Write-Host '      Key 只存在本机，不会上传；换电脑需要重新填' -ForegroundColor Gray
 Write-Host ''
 Write-Host '   在正文里选中文字会弹出小浮窗：解释 / 翻译 / 说人话 / 总结' -ForegroundColor Gray
+Write-Host '   插件会自动适配这台电脑的 Typora 内核（新机器完整形态 / 老机器兼容形态）' -ForegroundColor Gray
 Write-Host '   卸载：双击 installer\uninstall.bat' -ForegroundColor Gray
 Write-Host '  ----------------------------------------------------------' -ForegroundColor Cyan
 Write-Host ''

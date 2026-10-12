@@ -1,5 +1,5 @@
 /* ==========================================================================
-   xff助手一号 · 前端 v2.5
+   xff助手一号 · 前端 v2.6
    --------------------------------------------------------------------------
    兼容性（重要）：目标是 Typora 1.8.3 自带的 Electron 1.8.3 / Chromium 59（2017）。
    禁止使用该内核不认识的东西，否则界面会「错乱」：
@@ -21,7 +21,7 @@
   if (window.__TYPORA_AI_BRIDGE_V3__) return;
   window.__TYPORA_AI_BRIDGE_V3__ = true;
 
-  var VERSION = '2.5';
+  var VERSION = '2.6';
   var PORT = window.__AI_BRIDGE_PORT__ || 8765;
   var TOKEN = window.__AI_BRIDGE_TOKEN__ || '';
   var BASE = 'http://127.0.0.1:' + PORT;
@@ -137,6 +137,65 @@
 
   var CFG = loadCfg();
   var MODE = window.__TYAI_MODE__ || 'bridge';
+
+  /* ======================================================================
+   * 运行环境适配：结合本机 Typora 的内核版本决定运行形态
+   * ----------------------------------------------------------------------
+   * 不同电脑上的 Typora 内嵌内核差别很大（老版 Electron 1.8 = Chromium 59，
+   * 新版已到 Chromium 120+）。策略是「一套代码，两级形态」：
+   *   · 基线（所有内核通用）：CSS/JS 只用老内核也认识的写法，保证不错乱；
+   *   · 增强（探测到新内核时）：给 #tyai-root 加 .tyai-k-modern，
+   *     CSS 里只有该形态下才出现现代化观感（毛玻璃遮罩等）。
+   * 探测结果同时暴露在设置面板与 __tyai.kernel()，出问题时好定位。
+   * ==================================================================== */
+
+  // 极老内核兜底：NodeList.forEach（Chrome 51+）/ Element.remove（Chrome 41+）
+  if (window.NodeList && !NodeList.prototype.forEach) {
+    NodeList.prototype.forEach = Array.prototype.forEach;
+  }
+  if (window.Element && !Element.prototype.remove) {
+    Element.prototype.remove = function () { if (this.parentNode) this.parentNode.removeChild(this); };
+  }
+
+  function detectKernel() {
+    var ua = (navigator && navigator.userAgent) || '';
+    var chrome = 0, electron = '';
+    var m = ua.match(/Chrome\/(\d+)/);
+    if (m) chrome = parseInt(m[1], 10) || 0;
+    m = ua.match(/Electron\/([\d.]+)/);
+    if (m) electron = m[1];
+
+    // 安装脚本探测到的版本作为兜底（UA 被改写认不出时用它）
+    var hint = 0;
+    try { hint = parseInt((window.__TYAI_CONFIG__ && window.__TYAI_CONFIG__.kernel) || 0, 10) || 0; } catch (e) {}
+    if (!chrome && hint > 0) chrome = hint;
+
+    function cssOk(prop, val) {
+      try { return !!(window.CSS && CSS.supports && CSS.supports(prop, val)); } catch (e) { return false; }
+    }
+
+    var feats = {
+      // 布局关键特性：缺任何一项都退回保守基线
+      inset: chrome >= 87 || cssOk('inset', '0'),
+      flexGap: chrome >= 84 || cssOk('gap', '8px'),
+      gridGap: chrome >= 66 || cssOk('gap', '8px'),
+      focusWithin: chrome >= 60,
+      blur: chrome >= 76 || cssOk('backdrop-filter', 'blur(2px)') || cssOk('-webkit-backdrop-filter', 'blur(2px)')
+    };
+    var modern = chrome >= 87 && feats.inset && feats.flexGap && feats.focusWithin;
+
+    return {
+      chrome: chrome,
+      electron: electron,
+      modern: !!modern,
+      feats: feats,
+      label: chrome > 0
+        ? ('Chromium ' + chrome + (electron ? ' · Electron ' + electron : ''))
+        : '未能识别（按保守模式运行）'
+    };
+  }
+
+  var KERNEL = detectKernel();
 
   /* ======================================================================
    * 状态
@@ -923,6 +982,16 @@
 
   function loadSessions() {
     try { state.sessions = JSON.parse(localStorage.getItem(STORE_KEY) || '[]') || []; } catch (e) { state.sessions = []; }
+    // 兜底：历史数据损坏（不是数组 / 缺字段）时重建，别让整个面板起不来
+    if (!Array.isArray(state.sessions)) state.sessions = [];
+    for (var i = 0; i < state.sessions.length; i++) {
+      var s = state.sessions[i];
+      if (!s || typeof s !== 'object') { state.sessions.splice(i--, 1); continue; }
+      if (!Array.isArray(s.messages)) s.messages = [];
+      if (!s.id) s.id = uid();
+      if (!s.title) s.title = '新对话';
+      if (!s.ts) s.ts = Date.now();
+    }
     if (!state.sessions.length) state.sessions.push(newSession('新对话'));
     var saved = null;
     try { saved = localStorage.getItem(STORE_KEY + '.cur'); } catch (e) {}
@@ -1100,6 +1169,7 @@
       '        <div class="tyai-field"><span>温度 <i id="tyai-f-tempv">0.7</i></span><input id="tyai-f-temp" type="range" min="0" max="1.5" step="0.1"></div>' +
       '        <label class="tyai-field"><span>上下文上限（字符）</span><input id="tyai-f-maxctx" type="number" min="1000" max="200000" step="1000"></label>' +
       '        <p class="tyai-note">Key 只保存在本机，不会上传；换一台电脑需重新填写。</p>' +
+      '        <p class="tyai-note" id="tyai-kernel-note"></p>' +
       '        <div class="tyai-testbox" id="tyai-testbox"></div>' +
       '      </div>' +
       '      <div class="tyai-sheet-foot">' +
@@ -1112,6 +1182,10 @@
       '</div>';
 
     document.body.appendChild(root);
+
+    // 内核形态标记：新内核 -> tyai-k-modern（启用毛玻璃等增强）；老内核 -> tyai-k-legacy
+    root.classList.add(KERNEL.modern ? 'tyai-k-modern' : 'tyai-k-legacy');
+    if (KERNEL.chrome > 0) root.setAttribute('data-kernel', String(KERNEL.chrome));
 
     ball = $('tyai-ball');
     panel = $('tyai-panel');
@@ -1127,6 +1201,8 @@
     els.popModel = $('tyai-pop-model');
     els.popSess = $('tyai-pop-sess');
     els.sheet = $('tyai-sheet');
+    $('tyai-kernel-note').textContent =
+      '运行环境：' + KERNEL.label + '（' + (KERNEL.modern ? '完整形态' : '兼容形态') + '）';
 
     bindUI();
     loadSessions();
@@ -1154,7 +1230,8 @@
       if (!btn) return;
       var scene = btn.getAttribute('data-scene');
       hideBubble();
-      if (scene) runScene(scene, state.lastSelection);
+      // 场景按钮：先把侧栏唤出，再执行 —— 否则面板关着时点了没反应
+      if (scene) { togglePanel(true); runScene(scene, state.lastSelection); }
       else if (btn.getAttribute('data-act') === 'chat') {
         switchTab('chat');
         composerInput.value = '关于我选中的这段内容：\n「' + (state.lastSelection || '').slice(0, 500) + '」\n';
@@ -1775,7 +1852,7 @@
   }
 
   function runAgent(task) {
-    if (state.busy || !task) return;
+    if (state.busy || !task) { if (state.busy) flash('正在生成中，先等当前任务完成或点停止'); return; }
     state.lastAgentTask = task;
     state.agentResult = [];
     els.timeline.innerHTML = '';
@@ -1845,7 +1922,7 @@
   }
 
   function runScene(scene, forcedText) {
-    if (state.busy) return;
+    if (state.busy) { flash('正在生成中，先等当前回答完成或点停止'); return; }
     switchTab('quick');
     var sel = forcedText || state.lastSelection || getSelectionText() || '';
     state.lastSelection = sel;
@@ -2061,6 +2138,11 @@
     buildUI();
     restoreBallPos();
 
+    try {
+      console.log('[xff助手一号] v' + VERSION + ' · ' + KERNEL.label + ' · ' +
+        (KERNEL.modern ? '完整形态' : '兼容形态') + ' · ' + (MODE === 'direct' ? '直连' : '桥接') + '模式');
+    } catch (e) {}
+
     // 错误提示里的「去配置」按钮（事件委托）
     root.addEventListener('click', function (e) {
       var b = e.target.closest('.tyai-inline-btn[data-open-cfg]');
@@ -2072,11 +2154,12 @@
 
     window.__tyai = {
       version: VERSION,
+      kernel: function () { return KERNEL; },
       open: function () { togglePanel(true); },
       tab: switchTab,
-      runScene: runScene,
-      chat: function (text) { switchTab('chat'); composerInput.value = text; sendChat(); },
-      agent: function (text) { switchTab('agent'); runAgent(text); },
+      runScene: function (scene, text) { togglePanel(true); return runScene(scene, text); },
+      chat: function (text) { togglePanel(true); switchTab('chat'); composerInput.value = text; sendChat(); },
+      agent: function (text) { togglePanel(true); switchTab('agent'); runAgent(text); },
       cfg: function () { return CFG; },
       mode: function () { return MODE; },
       sheet: openSheet,
