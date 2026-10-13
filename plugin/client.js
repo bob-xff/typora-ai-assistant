@@ -1,5 +1,5 @@
 /* ==========================================================================
-   xff助手一号 · 前端 v2.7
+   xff助手一号 · 前端 v2.8
    --------------------------------------------------------------------------
    兼容性（重要）：目标是 Typora 1.8.3 自带的 Electron 1.8.3 / Chromium 59（2017）。
    禁止使用该内核不认识的东西，否则界面会「错乱」：
@@ -21,7 +21,7 @@
   if (window.__TYPORA_AI_BRIDGE_V3__) return;
   window.__TYPORA_AI_BRIDGE_V3__ = true;
 
-  var VERSION = '2.7';
+  var VERSION = '2.8';
   var PORT = window.__AI_BRIDGE_PORT__ || 8765;
   var TOKEN = window.__AI_BRIDGE_TOKEN__ || '';
   var BASE = 'http://127.0.0.1:' + PORT;
@@ -223,8 +223,6 @@
     lastRange: null,
     lastResult: '',
     lastScene: null,
-    lastAgentTask: '',
-    agentResult: [],
   };
 
   var root, ball, panel, statusEl, bubble, composerInput;
@@ -760,17 +758,12 @@
 
     var AGENT_PLAN_SYSTEM =
       '你是「学习智能体」，运行在用户本地的学习助手里。用户会给你一个学习任务和一份文档上下文。\n' +
-      '你的第一步是把任务拆解成 2~4 个可执行的步骤。\n\n' +
+      '你的第一步是理解目标，把任务拆解成 2~6 个可执行的步骤。\n\n' +
       '硬性要求：\n' +
       '1. 只输出一个 JSON 对象，禁止输出 JSON 以外的任何文字（包括解释、代码块围栏）。\n' +
       '2. 格式：{"steps":[{"title":"步骤短标题（不超过12字）","goal":"这一步具体做什么，一句话"}]}\n' +
       '3. 步骤通常依次为：梳理讲解 → 深入举例 → 检验总结；按任务需要调整。\n' +
       '4. 不要编造文档里不存在的知识。文档不足以完成任务时，在对应步骤的 goal 里写明「基于通用知识」。';
-
-    var AGENT_STEP_SYSTEM =
-      BASE_SYSTEM +
-      '\n7. 当前处于「智能体模式」：你正在执行多步骤任务中的一步。直接输出这一步的成果，不要复述步骤名，不要说「接下来我们」。\n' +
-      '8. 若这不是最后一步，结尾不要对整个任务做总结；最后一步需要给出收束性的小结。';
 
     function agentPlanPrompt(opts) {
       var parts = ['学习任务：' + opts.task];
@@ -780,17 +773,65 @@
       return parts.join('\n');
     }
 
-    function agentStepPrompt(opts) {
-      var prev = (opts.prevResults || [])
-        .map(function (r, i) { return '【步骤' + (i + 1) + ' · 已完成】\n' + String(r).slice(0, 3000); })
-        .join('\n\n');
-      var parts = ['总任务：' + opts.task];
-      if (opts.step) parts.push('当前是第 ' + (opts.index + 1) + '/' + opts.total + ' 步：' + opts.step.title + ' —— ' + opts.step.goal);
-      if (opts.selection) parts.push('\n用户选中的内容：\n<<<\n' + String(opts.selection).slice(0, 4000) + '\n>>>');
-      if (opts.docText) parts.push('\n文档上下文（可能截断）：\n<<<DOC\n' + opts.docText + '\nDOC>>>');
-      if (prev) parts.push('\n\n前面步骤的成果（供衔接，不要重复）：\n' + prev);
-      parts.push('\n现在直接输出这一步的成果。');
-      return parts.join('\n\n');
+    var AGENT_LOOP_SYSTEM =
+      '你是「学习智能体」，运行在用户本地的学习助手里，正在自主完成多步任务中的一步。\n' +
+      '你可以调用工具：在回复的最末尾输出一个工具调用块（独占一段）：\n' +
+      '```tool\n{"tool":"工具名","args":{...}}\n```\n' +
+      '可用工具与参数：\n' +
+      '- read_document — 重新读取当前文档全文。args: {}\n' +
+      '- save_md — 把 Markdown 内容保存为 .md 文件（要交付文档时用）。args: {"content":"markdown 全文","name":"文件名.md"(可选)}\n' +
+      '- clipboard — 复制文本到剪贴板。args: {"text":"..."}\n' +
+      '- memory_save — 把要点存入长期记忆（跨任务保留，之后的任务能读到）。args: {"content":"..."}\n' +
+      '- memory_load — 读取长期记忆。args: {}\n' +
+      '- todo_set — 更新任务清单进度。args: {"items":[{"text":"...","status":"todo|doing|done"}]}\n' +
+      '- plan_revise — 调整剩余计划。args: {"steps":[{"title":"短标题","goal":"一句话"}]}\n' +
+      '- finish — 任务收束（提前完成时用）。args: {"summary":"一句话总结"}\n\n' +
+      '规则：\n' +
+      '1. 每轮最多一个工具调用，写在回复末尾；发出后会收到【工具结果】，再继续。\n' +
+      '2. 不再需要工具时，直接输出给用户看的最终内容（不要工具块），本步即完成。\n' +
+      '3. 面向用户的正文用 Markdown 排版；给用户的文字里不要出现工具调用块。\n' +
+      '4. 禁止编造文档里没有的事实；材料不足就直说缺什么。\n' +
+      '5. 产出长文档（笔记/测验卷）时，主动用 save_md 落成文件，不要只留在对话里。';
+
+    // 从模型输出里解析工具调用块（取最后一个；容忍未闭合的流式半截块）
+    function parseToolCall(text) {
+      if (!text) return null;
+      var blocks = String(text).match(/```tool\s*([\s\S]*?)(?:```|$)/g);
+      if (!blocks || !blocks.length) return null;
+      var last = blocks[blocks.length - 1];
+      var start = last.indexOf('{');
+      if (start < 0) return null;
+      var depth = 0, end = -1, inStr = false, escCh = false;
+      for (var i = start; i < last.length; i++) {
+        var c = last[i];
+        if (inStr) {
+          if (escCh) escCh = false;
+          else if (c === '\\') escCh = true;
+          else if (c === '"') inStr = false;
+          continue;
+        }
+        if (c === '"') inStr = true;
+        else if (c === '{') depth++;
+        else if (c === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+      }
+      if (end < 0) return null;
+      try {
+        var obj = JSON.parse(last.slice(start, end));
+        var tool = String(obj.tool || '');
+        var ok = { read_document: 1, save_md: 1, clipboard: 1, memory_save: 1, memory_load: 1, todo_set: 1, plan_revise: 1, finish: 1 };
+        if (!ok[tool]) return null;
+        return { tool: tool, args: (obj.args && typeof obj.args === 'object') ? obj.args : {} };
+      } catch (e) { return null; }
+    }
+
+    // 去掉工具调用块，只留面向用户的正文：
+    // 闭合块整块移除（保留块后的正文）；未闭合的尾块（流式半截）从标记处截断
+    function stripToolBlocks(text) {
+      var t = String(text || '');
+      t = t.replace(/```tool[\s\S]*?```/g, '');
+      var i = t.indexOf('```tool');
+      if (i >= 0) t = t.slice(0, i);
+      return t;
     }
 
     function parsePlan(text) {
@@ -810,7 +851,7 @@
         var steps = Array.isArray(obj.steps) ? obj.steps : [];
         var clean = steps
           .filter(function (s) { return s && (s.title || s.goal); })
-          .slice(0, 5)
+          .slice(0, 6)
           .map(function (s) { return { title: String(s.title || s.goal).slice(0, 30), goal: String(s.goal || s.title).slice(0, 200) }; });
         return clean.length ? clean : null;
       } catch (e) { return null; }
@@ -821,10 +862,11 @@
       buildMessages: buildMessages,
       buildChatMessages: buildChatMessages,
       AGENT_PLAN_SYSTEM: AGENT_PLAN_SYSTEM,
-      AGENT_STEP_SYSTEM: AGENT_STEP_SYSTEM,
+      AGENT_LOOP_SYSTEM: AGENT_LOOP_SYSTEM,
       agentPlanPrompt: agentPlanPrompt,
-      agentStepPrompt: agentStepPrompt,
       parsePlan: parsePlan,
+      parseToolCall: parseToolCall,
+      stripToolBlocks: stripToolBlocks,
     };
   })();
 
@@ -951,8 +993,6 @@
       return function () {};
     }
 
-    if (path === '/agent') return directAgent(body, handlers);
-
     var messages;
     if (path === '/chat') {
       messages = DP.buildChatMessages({ history: body.messages, context: body.context, selection: body.selection });
@@ -965,70 +1005,6 @@
       });
     }
     return directRequest({ messages: messages }, handlers);
-  }
-
-  function directAgent(body, handlers) {
-    var aborted = { v: false };
-    var abortFn = null;
-
-    var task = String(body.task || '');
-    var docText = String((body.context && body.context.docText) || '');
-    var selection = String(body.selection || '');
-
-    var planAcc = '';
-    abortFn = directRequest({
-      messages: [
-        { role: 'system', content: DP.AGENT_PLAN_SYSTEM },
-        { role: 'user', content: DP.agentPlanPrompt({ task: task, selection: selection, docText: docText }) },
-      ],
-      temperature: 0.3,
-    }, {
-      onDelta: function (d) { planAcc += d; },
-      onFinish: function () { handlers.onFinish && handlers.onFinish(); },
-      onEnd: function () {
-        if (aborted.v) return;
-        var steps = DP.parsePlan(planAcc) || [{ title: '执行任务', goal: task }];
-        handlers.onPlan && handlers.onPlan({ steps: steps.map(function (s) { return s.title; }) });
-
-        var results = [];
-        var i = 0;
-        (function next() {
-          if (aborted.v) return;
-          if (i >= steps.length) { handlers.onEnd && handlers.onEnd(); return; }
-          var idx = i++;
-          handlers.onStepStart && handlers.onStepStart({ i: idx, total: steps.length, title: steps[idx].title, goal: steps[idx].goal });
-          var acc = '';
-          abortFn = directRequest({
-            messages: [
-              { role: 'system', content: DP.AGENT_STEP_SYSTEM },
-              { role: 'user', content: DP.agentStepPrompt({ task: task, step: steps[idx], index: idx, total: steps.length, prevResults: results, selection: selection, docText: docText }) },
-            ],
-          }, {
-            onDelta: function (d) {
-              acc += d;
-              handlers.onDelta && handlers.onDelta(d, idx);
-            },
-            onFinish: function () { handlers.onFinish && handlers.onFinish(); },
-            onEnd: function () {
-              results[idx] = acc || '（这一步没有产出）';
-              handlers.onStepEnd && handlers.onStepEnd({ i: idx });
-              next();
-            },
-            onError: function (err) {
-              results[idx] = '';
-              handlers.onError && handlers.onError(err);
-              next(); // 单步失败不拖垮整个任务
-            },
-          });
-        })();
-      },
-      onError: function (err) { handlers.onError && handlers.onError(err); },
-    });
-
-    return function () {
-      aborted.v = true;
-      try { abortFn && abortFn(); } catch (e) {}
-    };
   }
 
   /* ---------------- 统一入口：优先桥接，失败自动降级直连 ---------------- */
@@ -1052,6 +1028,29 @@
       handlers.onError && handlers.onError(err);
     };
     return request('POST', path, body, wrapped);
+  }
+
+  /* Agent 循环用的底层 LLM 调用：桥接走 /llm 透传（原样转发 messages），
+     直连走 directRequest；桥接失败自动降级直连。 */
+  function llmStream(opts, handlers) {
+    if (MODE === 'direct') return directRequest(opts, handlers);
+
+    var retried = false;
+    var wrapped = {};
+    for (var k in handlers) wrapped[k] = handlers[k];
+    wrapped.onError = function (err) {
+      var msg = String((err && err.message) || err);
+      if (!retried && window.reqnode &&
+          /ECONNREFUSED|socket hang up|Failed to fetch|桥接/i.test(msg)) {
+        retried = true;
+        MODE = 'direct';
+        updateStatus();
+        state.abort = directRequest(opts, handlers);
+        return;
+      }
+      handlers.onError && handlers.onError(err);
+    };
+    return request('POST', '/llm', { messages: opts.messages, temperature: opts.temperature }, wrapped);
   }
 
   /* ======================================================================
@@ -1271,7 +1270,6 @@
       '  <div class="tyai-foot">' +
       '    <div class="tyai-actions" id="tyai-actions">' +
       '      <button data-act="copy">' + icon('copy', 14) + '复制</button>' +
-      '      <button data-act="save">' + icon('save', 14) + '存为 .md</button>' +
       '      <button data-act="insert">' + icon('insert', 14) + '插入文档</button>' +
       '      <button data-act="redo">' + icon('redo', 14) + '重新生成</button>' +
       '    </div>' +
@@ -1435,7 +1433,6 @@
       if (!btn) return;
       var act = btn.getAttribute('data-act');
       if (act === 'copy') copyText(currentResultText());
-      else if (act === 'save') saveMarkdown(currentResultText(), suggestMdName());
       else if (act === 'insert') insertToDoc(currentResultText());
       else if (act === 'redo') redoCurrent();
     });
@@ -1449,6 +1446,14 @@
       composerInput.value = '';
       composerInput.style.height = 'auto';
       runAgent(text);
+    });
+
+    // 时间线：工具卡展开/收起；中断后「继续」
+    els.timeline.addEventListener('click', function (e) {
+      var rs = e.target.closest('[data-agent-resume]');
+      if (rs) { runAgent('', true); return; }
+      var tc = e.target.closest('[data-tool-toggle]');
+      if (tc) tc.classList.toggle('open');
     });
 
     // ---------- 历史会话栏 ----------
@@ -1894,6 +1899,7 @@
     else if (tab === 'agent') composerInput.placeholder = '描述你的学习任务，例如：把这篇文档整理成复习笔记';
     else composerInput.placeholder = '针对选中内容追问…';
     if (tab === 'quick') renderContext();
+    if (tab === 'agent' && !state.busy) renderAgent();   // 恢复持久化的运行状态
     updateActions();
   }
 
@@ -1934,7 +1940,8 @@
   function redoCurrent() {
     if (state.busy) return;
     if (state.tab === 'agent') {
-      if (state.lastAgentTask) runAgent(state.lastAgentTask);
+      var a = agentState();
+      if (a && a.task) runAgent(a.task);
       else flash('还没有任务可重跑');
       return;
     }
@@ -1962,9 +1969,6 @@
   function updateActions() {
     var has = !!currentResultText();
     els.actions.classList.toggle('on', has);
-    // 「存为 .md」只在智能体模式展示（对话/快捷结果用复制与插入文档更顺手）
-    var saveBtn = els.actions.querySelector('[data-act="save"]');
-    if (saveBtn) saveBtn.style.display = (state.tab === 'agent' && has) ? '' : 'none';
   }
 
   /* ---------- 导出 Markdown 文件 ---------- */
@@ -2106,79 +2110,454 @@
   }
 
   /* ---------------------------- 智能体模式 ---------------------------- */
+  /* 自主 Agent 循环（全部在客户端驱动，直连/桥接共用）：
+     目标理解 → 任务分解 → 逐步执行（模型可调用工具、反思纠错）→ 收束沉淀。
+     运行状态持久化在会话里（s.agent），重开面板/重启 Typora 后可恢复与继续。 */
 
+  var AGENT_MEM_KEY = 'tyai.agent.mem';
+  var AGENT_MAX_STEPS = 6;
+  var AGENT_MAX_TURNS = 5;    // 每步最多几轮工具往返
+  var AGENT_MAX_CALLS = 24;   // 整个任务最多几次 LLM 调用（保护钱包）
+
+  function agentMemoryLoad() {
+    try { return JSON.parse(localStorage.getItem(AGENT_MEM_KEY) || '[]') || []; } catch (e) { return []; }
+  }
+  function agentMemorySaveList(list) {
+    try { localStorage.setItem(AGENT_MEM_KEY, JSON.stringify(list.slice(0, 20))); } catch (e) {}
+  }
+  function agentMemoryAdd(task, content) {
+    if (!content) return;
+    var list = agentMemoryLoad();
+    list.push({ ts: Date.now(), task: String(task || '').slice(0, 80), content: String(content).slice(0, 2000) });
+    agentMemorySaveList(list);
+  }
+  function agentMemoryBlock() {
+    var list = agentMemoryLoad();
+    if (!list.length) return '';
+    var from = Math.max(0, list.length - 5);
+    var recent = list.slice(from).map(function (m, i) {
+      return (from + i + 1) + '. [' + (m.task || '早前任务') + '] ' + String(m.content).slice(0, 300);
+    }).join('\n');
+    return '\n\n【长期记忆（早前任务存下的要点，可用 memory_save 增补）】\n' + recent;
+  }
+
+  function agentState() {
+    var s = curSession();
+    return s.agent || null;
+  }
+
+  function agentPersist() {
+    var a = agentState();
+    if (a) a.updated = Date.now();
+    saveSessions();
+  }
+
+  // 复制/插入文档用的全文
   function agentAllText() {
-    var task = state.lastAgentTask;
-    if (!task && !state.agentResult.length) return '';
-    var out = ['> **智能体任务：' + (task || '') + '**', ''];
-    state.agentResult.forEach(function (r, i) {
-      if (!r) return;
-      out.push('**第 ' + (i + 1) + ' 步**', '', r, '');
+    var a = agentState();
+    if (!a) return '';
+    var out = ['> **智能体任务：' + a.task + '**', ''];
+    a.steps.forEach(function (st, i) {
+      if (!st || !st.text) return;
+      out.push('**第 ' + (i + 1) + ' 步 · ' + st.title + '**', '', st.text, '');
     });
+    if (a.summary) out.push('**小结**', '', a.summary, '');
     return out.join('\n').trim();
   }
 
-  function runAgent(task) {
-    if (state.busy || !task) { if (state.busy) flash('正在生成中，先等当前任务完成或点停止'); return; }
-    state.lastAgentTask = task;
-    state.agentResult = [];
+  function toolArgBrief(tool, args) {
+    args = args || {};
+    if (tool === 'save_md') return String(args.name || suggestMdName());
+    if (tool === 'clipboard') return '复制 ' + String(args.text || '').length + ' 字';
+    if (tool === 'memory_save') return String(args.content || '').slice(0, 40);
+    if (tool === 'memory_load') return '读取长期记忆';
+    if (tool === 'read_document') return '重读文档';
+    if (tool === 'todo_set') return '更新任务清单（' + ((args.items || []).length) + ' 项）';
+    if (tool === 'plan_revise') return '调整剩余计划（' + ((args.steps || []).length) + ' 步）';
+    if (tool === 'finish') return String(args.summary || '').slice(0, 60);
+    return '';
+  }
+
+  function toolCallHTML(call) {
+    var brief = toolArgBrief(call.tool, call.args);
+    return '<div class="tyai-toolcall' + (call.ok ? '' : ' fail') + '" data-tool-toggle="1" title="点开/收起工具结果">' +
+      '<span class="tyai-tool-dot"></span>' +
+      '<code>' + esc(call.tool) + '</code>' +
+      (brief ? '<i>' + esc(brief) + '</i>' : '') +
+      (call.result ? '<div class="tyai-tool-result">' + esc(String(call.result).slice(0, 600)) + '</div>' : '') +
+      '</div>';
+  }
+
+  function toolChipsHTML(st) {
+    return (st.calls || []).map(toolCallHTML).join('');
+  }
+
+  function agentStepHTML(i, st) {
+    var cls = st.status === 'done' ? ' done' : st.status === 'fail' ? ' fail' : '';
+    return '<div class="tyai-step" data-step="' + i + '">' +
+      '<div class="tyai-step-head"><span class="tyai-step-dot' + cls + '"></span><b>第 ' + (i + 1) + ' 步 · ' + esc(st.title) + '</b>' +
+      '<i class="tyai-step-goal">' + esc(st.goal || '') + '</i></div>' +
+      '<div class="tyai-step-body">' +
+      (st.status === 'doing' ? '<div class="tyai-loading"><span></span><span></span><span></span></div>' : '') +
+      '</div></div>';
+  }
+
+  // 整条时间线重绘（恢复 / 切 tab / 计划调整后用；流式期间不要调，避免打断 paintStream）
+  function renderAgent() {
+    var a = agentState();
     els.timeline.innerHTML = '';
-    $('tyai-agent-hint').textContent = '';
+    if (!a) { $('tyai-agent-hint').innerHTML = ''; return; }
+    for (var i = 0; i < a.steps.length; i++) {
+      var st = a.steps[i];
+      els.timeline.insertAdjacentHTML('beforeend', agentStepHTML(i, st));
+      if (st.text || (st.calls && st.calls.length)) {
+        var card = els.timeline.querySelector('[data-step="' + i + '"]');
+        if (card) card.querySelector('.tyai-step-body').innerHTML = mdToHtml(st.text || '') + toolChipsHTML(st);
+      }
+    }
+    renderAgentHint();
+    scrollBottom(els.timeline);
+  }
+
+  function renderAgentHint() {
+    var a = agentState();
+    var hint = $('tyai-agent-hint');
+    if (!a) { hint.innerHTML = ''; return; }
+    var done = 0;
+    for (var i = 0; i < a.steps.length; i++) if (a.steps[i] && a.steps[i].status === 'done') done++;
+    var label = { running: '运行中', done: '已完成', error: '已出错', stopped: '已停止' }[a.status] || '';
+    var todoBits = '';
+    if (a.todo && a.todo.length) {
+      var tdone = 0;
+      for (var j = 0; j < a.todo.length; j++) if (a.todo[j].status === 'done') tdone++;
+      todoBits = ' · 清单 ' + tdone + '/' + a.todo.length;
+    }
+    var resume = (a.status === 'stopped' || a.status === 'error')
+      ? ' <button type="button" class="tyai-inline-btn" data-agent-resume="1">继续</button>' : '';
+    hint.innerHTML = '任务：' + esc(String(a.task).slice(0, 40)) + ' · ' + label +
+      '（' + done + '/' + a.steps.length + ' 步）' + todoBits + resume;
+  }
+
+  function runAgent(task, resume) {
+    var a = agentState();
+    if (state.busy) { flash('正在生成中，先等当前任务完成或点停止'); return; }
+    if (resume && a && a.task) {
+      task = a.task;
+      for (var i = 0; i < a.steps.length; i++) {
+        if (a.steps[i].status !== 'done') a.steps[i].status = 'todo';
+      }
+      a.status = 'running';
+      a.calls = a.calls || 0;
+    } else {
+      if (!task) { flash('先描述一下学习任务'); return; }
+      a = curSession().agent = { task: task, steps: [], status: 'running', calls: 0, todo: null, summary: '' };
+    }
+    els.timeline.innerHTML = '';
     setBusy(true);
+    agentPersist();
+    renderAgent();
 
-    var stepCards = {};
-    var currentTextEl = null;
-    var currentStep = -1;
+    var aborted = { v: false };
+    var abortFn = null;
+    var currentIdx = -1;
 
-    state.abort = aiPost('/agent', {
-      task: task,
-      selection: state.lastSelection || '',
-      context: currentContext(),
-    }, {
-      onPlan: function (plan) {
-        $('tyai-agent-hint').textContent = '拆成 ' + plan.steps.length + ' 步：' + plan.steps.join(' → ');
-      },
-      onStepStart: function (s) {
-        currentStep = s.i;
-        els.timeline.insertAdjacentHTML('beforeend',
-          '<div class="tyai-step" data-step="' + s.i + '">' +
-          '<div class="tyai-step-head"><span class="tyai-step-dot"></span><b>' + (s.i + 1) + '/' + s.total + ' · ' + esc(s.title) + '</b>' +
-          '<i class="tyai-step-goal">' + esc(s.goal || '') + '</i></div>' +
-          '<div class="tyai-step-body"><div class="tyai-loading"><span></span><span></span><span></span></div></div></div>');
-        stepCards[s.i] = els.timeline.querySelector('[data-step="' + s.i + '"]');
-        currentTextEl = stepCards[s.i].querySelector('.tyai-step-body');
-        scrollBottom(els.timeline);
-      },
-      onDelta: function (d, step) {
-        if (currentTextEl && step != null) {
-          state.agentResult[step] = (state.agentResult[step] || '') + d;
-          paintStream(currentTextEl, mdToHtml(state.agentResult[step]), els.timeline);
+    state.abort = function () {
+      aborted.v = true;
+      try { abortFn && abortFn(); } catch (e) {}
+      var cur = agentState();
+      if (cur && cur.status === 'running') {
+        if (currentIdx >= 0 && cur.steps[currentIdx]) cur.steps[currentIdx].status = 'todo';
+        cur.status = 'stopped';
+        agentPersist();
+        renderAgentHint();
+      }
+      setBusy(false);
+      updateActions();
+      flash('已停止，可点「继续」接着跑');
+    };
+
+    function callLLM(messages, temperature, onDone, onFail, onDelta) {
+      if (a.calls >= AGENT_MAX_CALLS) {
+        onFail(new Error('已达本任务调用上限（' + AGENT_MAX_CALLS + ' 次），任务到此为止'), '');
+        return;
+      }
+      a.calls++;
+      var acc = '';
+      abortFn = llmStream({ messages: messages, temperature: temperature }, {
+        onDelta: function (d) {
+          if (aborted.v) return;
+          acc += d;
+          if (onDelta) onDelta(d, acc);
+        },
+        onEnd: function () { if (!aborted.v) onDone(acc); },
+        onError: function (err) { if (!aborted.v) onFail(err, acc); },
+      });
+    }
+
+    function stepBody(idx) {
+      var card = els.timeline.querySelector('[data-step="' + idx + '"]');
+      return card ? card.querySelector('.tyai-step-body') : null;
+    }
+
+    function finishAll(status) {
+      a.status = status;
+      if (status === 'done') {
+        agentMemoryAdd(a.task, '任务「' + a.task + '」完成。' + (a.summary ? '小结：' + a.summary : ''));
+      }
+      agentPersist();
+      renderAgent();          // 与（可能被 finish 截断过的）步骤列表同步
+      renderAgentHint();
+      setBusy(false);
+      updateActions();
+      scrollBottom(els.timeline);
+    }
+
+    function agentFail(idx, err) {
+      var html = '<div class="tyai-err">' + esc(errText(err)) +
+        (needsSetup(err) ? '<button class="tyai-inline-btn" data-open-cfg="1">去配置</button>' : '') + '</div>';
+      if (idx != null && a.steps[idx]) {
+        a.steps[idx].status = 'fail';
+        var body = stepBody(idx);
+        if (body) {
+          body.insertAdjacentHTML('beforeend', html);
+          var card = els.timeline.querySelector('[data-step="' + idx + '"]');
+          var dot = card && card.querySelector('.tyai-step-dot');
+          if (dot) dot.classList.add('fail');
         }
-      },
-      onStepEnd: function (s) {
-        var card = stepCards[s.i];
-        if (card) card.querySelector('.tyai-step-dot').classList.add('done');
-      },
-      onError: function (err) {
-        var html = '<div class="tyai-err">' + esc(errText(err)) +
-          (needsSetup(err) ? '<button class="tyai-inline-btn" data-open-cfg="1">去配置</button>' : '') + '</div>';
-        // 计划阶段（还没有任何步骤卡）失败时，错误也必须可见 —— 否则用户侧看就是"点了没反应"
-        if (currentTextEl && stepCards[currentStep]) currentTextEl.insertAdjacentHTML('beforeend', html);
-        else els.timeline.insertAdjacentHTML('beforeend', html);
-        if (currentTextEl && stepCards[currentStep]) {
-          var card = stepCards[currentStep];
-          if (card) card.querySelector('.tyai-step-dot').classList.add('fail');
+      } else {
+        els.timeline.insertAdjacentHTML('beforeend', html);
+      }
+      a.status = 'error';
+      agentPersist();
+      renderAgentHint();
+      setBusy(false);
+      updateActions();
+      scrollBottom(els.timeline);
+    }
+
+    function firstTodo() {
+      for (var i = 0; i < a.steps.length; i++) {
+        if (a.steps[i].status !== 'done') return i;
+      }
+      return -1;
+    }
+
+    function markStepDone(idx, note) {
+      var st = a.steps[idx];
+      if (note) st.text = (st.text ? st.text + '\n\n' : '') + note;
+      st.status = 'done';
+      var body = stepBody(idx);
+      if (body) {
+        var card = els.timeline.querySelector('[data-step="' + idx + '"]');
+        var dot = card && card.querySelector('.tyai-step-dot');
+        if (dot) dot.classList.add('done');
+        flushStream(body, mdToHtml(st.text) + toolChipsHTML(st));
+      }
+      agentPersist();
+      updateActions();
+      scrollBottom(els.timeline);
+    }
+
+    function completeStep(idx, note) {
+      markStepDone(idx, note);
+      execFrom(firstTodo());
+    }
+
+    function execFrom(idx) {
+      if (idx < 0) { finishAll('done'); return; }
+      runStep(idx);
+    }
+
+    // ---- 工具执行（本地能力，全部同步完成） ----
+    function execTool(call, cb) {
+      var args = call.args || {};
+      var name = call.tool;
+      if (name === 'read_document') {
+        var doc = getDocText();
+        return cb(doc ? '文档全文（' + doc.length + ' 字）：\n' + doc : '（当前没有打开的文档）', !!doc);
+      }
+      if (name === 'save_md') {
+        var content = String(args.content || agentAllText() || '');
+        if (!content) return cb('没有可保存的内容', false);
+        saveMarkdown(content, String(args.name || '') || suggestMdName());
+        return cb('已执行保存（保存对话框/下载/剪贴板，视环境而定）。', true);
+      }
+      if (name === 'clipboard') {
+        var t = String(args.text || '');
+        if (!t) return cb('没有可复制的内容', false);
+        copyText(t);
+        return cb('已复制到剪贴板（' + t.length + ' 字）', true);
+      }
+      if (name === 'memory_save') {
+        if (!args.content) return cb('没有要记的内容', false);
+        agentMemoryAdd(a.task, String(args.content));
+        return cb('已存入长期记忆（现有 ' + agentMemoryLoad().length + ' 条）', true);
+      }
+      if (name === 'memory_load') {
+        var list = agentMemoryLoad();
+        if (!list.length) return cb('（长期记忆为空）', true);
+        return cb(list.slice(-8).map(function (m, i) {
+          return (i + 1) + '. [' + (m.task || '') + '] ' + m.content;
+        }).join('\n'), true);
+      }
+      if (name === 'todo_set') {
+        var items = Array.isArray(args.items) ? args.items : [];
+        if (!items.length) return cb('清单为空', false);
+        a.todo = items.slice(0, 10).map(function (t) {
+          return {
+            text: String(t && t.text || '').slice(0, 60),
+            status: (t && t.status === 'done') ? 'done' : (t && t.status === 'doing') ? 'doing' : 'todo',
+          };
+        });
+        renderAgentHint();
+        return cb('任务清单已更新', true);
+      }
+      if (name === 'plan_revise') {
+        var ns = Array.isArray(args.steps) ? args.steps : [];
+        var clean = [];
+        for (var i = 0; i < ns.length && clean.length < AGENT_MAX_STEPS; i++) {
+          var n = ns[i];
+          if (!n || (!n.title && !n.goal)) continue;
+          clean.push({
+            title: String(n.title || n.goal).slice(0, 30),
+            goal: String(n.goal || n.title).slice(0, 200),
+            status: 'todo', text: '', calls: [],
+          });
         }
-        scrollBottom(els.timeline);
-      },
-      onFinish: function () { setBusy(false); updateActions(); },
-      onEnd: function () {
-        if (!els.timeline.querySelector('.tyai-step') && !els.timeline.querySelector('.tyai-err')) {
-          els.timeline.innerHTML = '<div class="tyai-err">任务没有产出，请重试。</div>';
+        if (!clean.length) return cb('计划修订失败：没有有效步骤', false);
+        a.steps = a.steps.slice(0, currentIdx + 1).concat(clean);
+        renderAgent();
+        return cb('剩余计划已调整为 ' + clean.length + ' 步', true);
+      }
+      return cb('未知工具：' + name, false);
+    }
+
+    function runStep(idx) {
+      var st = a.steps[idx];
+      currentIdx = idx;
+      st.status = 'doing';
+      st.text = st.text || '';
+      st.calls = st.calls || [];
+      agentPersist();
+      renderAgent();          // 重建卡片（含 loading 态）
+      scrollBottom(els.timeline);
+
+      var turns = 0;
+      var retried = false;
+      var history = [];       // 本步内已完成的工具往返：{a: 模型输出, q: 工具结果}（反思纠错用）
+
+      function stepMessages() {
+        var prev = [];
+        for (var i = 0; i < idx; i++) {
+          if (a.steps[i].status === 'done' && a.steps[i].text) {
+            prev.push('【第' + (i + 1) + '步 · ' + a.steps[i].title + '】\n' + String(a.steps[i].text).slice(0, 2000));
+          }
         }
-        updateActions();
-      },
-    });
+        var todoBits = '';
+        if (a.todo && a.todo.length) {
+          todoBits = '\n当前任务清单：' + a.todo.map(function (t) {
+            return t.text + '(' + t.status + ')';
+          }).join('、');
+        }
+        var user = '总任务：' + a.task +
+          '\n当前执行第 ' + (idx + 1) + '/' + a.steps.length + ' 步：' + st.title + ' —— ' + st.goal +
+          (state.lastSelection ? '\n用户选中的内容（优先围绕它）：\n<<<\n' + String(state.lastSelection).slice(0, 4000) + '\n>>>' : '') +
+          '\n文档上下文（可能截断，可用 read_document 重读）：\n<<<DOC\n' + getDocText() + '\nDOC>>>' +
+          (prev.length ? '\n\n前面步骤的成果（衔接即可，不要重复）：\n' + prev.join('\n\n') : '') +
+          todoBits +
+          '\n\n现在执行这一步。需要工具就调用（块放回复末尾），完成后直接输出给用户的最终内容。';
+        var msgs = [{ role: 'system', content: DP.AGENT_LOOP_SYSTEM + agentMemoryBlock() }];
+        msgs.push({ role: 'user', content: user });
+        for (var k = 0; k < history.length; k++) {
+          if (history[k].a) msgs.push({ role: 'assistant', content: history[k].a });
+          msgs.push({ role: 'user', content: history[k].q });
+        }
+        return msgs;
+      }
+
+      // 流式期间：隐藏工具块（含未闭合半截），正文 + 已有工具卡一起重绘
+      function paintBody(curAcc) {
+        var body = stepBody(idx);
+        if (!body) return;
+        var shown = st.text;
+        if (curAcc) shown = (shown ? shown + '\n\n' : '') + DP.stripToolBlocks(curAcc);
+        paintStream(body, mdToHtml(shown) + toolChipsHTML(st) || '<p class="tyai-empty">…</p>', els.timeline);
+      }
+
+      function turn() {
+        if (aborted.v) return;
+        if (turns >= AGENT_MAX_TURNS) {
+          completeStep(idx, '（本步工具轮次已达上限，继续下一步）');
+          return;
+        }
+        turns++;
+        callLLM(stepMessages(), 0.4, function (acc) {
+          if (aborted.v) return;
+          var call = DP.parseToolCall(acc);
+          var prose = DP.stripToolBlocks(acc).trim();
+          if (prose) st.text = (st.text ? st.text + '\n\n' : '') + prose;
+          if (!call) return completeStep(idx);
+          execTool(call, function (result, ok) {
+            st.calls.push({ tool: call.tool, args: call.args, ok: ok, result: String(result).slice(0, 1500) });
+            if (call.tool === 'finish') {
+              a.summary = String((call.args && call.args.summary) || '').slice(0, 300);
+              a.steps = a.steps.slice(0, idx + 1);   // 提前收束：丢弃剩余步骤
+              markStepDone(idx);
+              finishAll('done');
+              return;
+            }
+            agentPersist();
+            if (aborted.v) return;
+            paintBody('');
+            scrollBottom(els.timeline);
+            history.push({
+              a: acc,
+              q: '【工具结果 · ' + call.tool + (ok ? '' : ' · 失败') + '】\n' + String(result).slice(0, 2000) +
+                '\n（收到结果。若工具失败请换一种做法；不需要再调用工具时，直接输出给用户的最终内容）',
+            });
+            turn();
+          });
+        }, function (err) {
+          if (!retried) {
+            // 反思纠错：把错误喂回去，让模型换一种做法重试一次
+            retried = true;
+            history.push({ a: '', q: '【错误】上一次请求失败：' + errText(err) + '。请重试本步，必要时调整做法。' });
+            turn();
+            return;
+          }
+          agentFail(idx, err);
+        }, function (d, acc) { paintBody(acc); });
+      }
+
+      turn();
+    }
+
+    // ---- 阶段 1：目标理解与任务分解（续跑时已有计划则跳过） ----
+    function planPhase() {
+      if (a.steps.length) { execFrom(firstTodo()); return; }
+      var loading = '<div class="tyai-plan-loading"><div class="tyai-loading"><span></span><span></span><span></span></div></div>';
+      els.timeline.innerHTML = loading;
+      callLLM([
+        { role: 'system', content: DP.AGENT_PLAN_SYSTEM },
+        { role: 'user', content: DP.agentPlanPrompt({
+            task: a.task,
+            selection: state.lastSelection || '',
+            docText: getDocText(),
+          }) },
+      ], 0.3, function (acc) {
+        var steps = DP.parsePlan(acc) || [{ title: '执行任务', goal: a.task }];
+        for (var i = 0; i < steps.length; i++) {
+          a.steps.push({ title: steps[i].title, goal: steps[i].goal, status: 'todo', text: '', calls: [] });
+        }
+        agentPersist();
+        renderAgent();
+        execFrom(0);
+      }, function (err) {
+        agentFail(null, err);
+      }, function () {});
+    }
+
+    planPhase();
   }
 
   /* ---------------------------- 快捷模式 ---------------------------- */

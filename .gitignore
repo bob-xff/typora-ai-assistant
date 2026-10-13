@@ -26,3 +26,4 @@ scripts/*
 !scripts/compat-check.js
 !scripts/mock_server.js
 !scripts/test-save-md.js
+!scripts/test-agent-protocol.js

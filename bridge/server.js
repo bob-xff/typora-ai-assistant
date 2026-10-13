@@ -420,6 +420,32 @@ async function handleAgent(req, res) {
   }
 }
 
+/* 通用 LLM 透传：客户端 Agent 循环驱动，服务端只转发 */
+async function handleLlm(req, res) {
+  let body;
+  try {
+    body = JSON.parse(await readBody(req));
+  } catch (e) {
+    return sendJson(res, 400, { error: '请求体不是合法 JSON：' + e.message });
+  }
+
+  const messages = Array.isArray(body.messages) ? body.messages : null;
+  const ok = messages && messages.length && messages.some((m) => m && m.role === 'user' && String(m.content || '').trim());
+  if (!needInput(res, Boolean(ok))) return;
+
+  const sse = initSSE(res);
+  const upstream = upstreamChat(
+    { messages, temperature: typeof body.temperature === 'number' ? body.temperature : undefined },
+    (delta) => sse.send({ delta }),
+    () => sse.done(),
+    (err) => {
+      sse.send({ error: String((err && err.message) || err) });
+      sse.done();
+    }
+  );
+  sse.abortUpstream(upstream);
+}
+
 const DEBUG_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <title>xff助手一号 · 本地测试台</title>
 <link rel="stylesheet" href="/client.css">
@@ -490,7 +516,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         ok: true,
         service: 'typora-ai-bridge',
-        version: '2.7',
+        version: '2.8',
         provider: CONFIG.provider,
         model: CONFIG.model,
         baseUrl: CONFIG.baseUrl,
@@ -539,6 +565,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && pathname === '/agent') {
       if (!sseGuard(req, res)) return;
       return await handleAgent(req, res);
+    }
+    // 通用 LLM 透传：客户端 Agent 循环用（messages 由客户端组装，服务端不掺和提示词）
+    if (req.method === 'POST' && pathname === '/llm') {
+      if (!sseGuard(req, res)) return;
+      return await handleLlm(req, res);
     }
 
     sendJson(res, 404, { error: '未知路径：' + pathname });

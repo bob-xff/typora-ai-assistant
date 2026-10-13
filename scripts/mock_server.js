@@ -39,10 +39,19 @@ const ASK_ANSWER = [
 ].join('');
 
 const PLAN_JSON = JSON.stringify({ steps: [
-  { title: '通读文档，提取核心概念', goal: '通读全文，列出核心概念与定义' },
-  { title: '梳理概念之间的关系', goal: '说明概念之间如何互相影响' },
-  { title: '整理成结构化复习笔记', goal: '输出一份 Markdown 复习笔记' },
+  { title: '重读文档，锁定核心概念', goal: '重读全文，确认核心概念与定义' },
+  { title: '产出复习笔记并保存', goal: '整理成 Markdown 复习笔记，并用 save_md 落成文件' },
 ] });
+
+/* Agent 循环脚本：按 LLM 调用序号推进（plan 请求会把计数清零）
+   t0 重读文档 → t1 概念+清单 → t2 笔记+保存 → t3 收束 */
+const AGENT_LOOP_SCRIPT = [
+  '先重读一遍文档，确认核心概念没有遗漏。\n```tool\n{"tool":"read_document","args":{}}\n```',
+  '核心概念确认：**梯度下降**、**学习率**、**局部最小值**。已把进度记入任务清单。\n```tool\n{"tool":"todo_set","args":{"items":[{"text":"梳理核心概念","status":"done"},{"text":"产出复习笔记并保存","status":"doing"}]}}\n```',
+  '# 复习笔记：梯度下降\n\n## 一句话定义\n沿负梯度方向迭代更新参数，逐步逼近函数最小值的优化算法。\n\n## 要点\n- 更新公式：θ := θ − α·∇J(θ)\n- 学习率过大 → 震荡/发散；过小 → 收敛慢\n- 非凸函数可能陷入局部最小值\n\n笔记已整理好，落成文件：\n```tool\n{"tool":"save_md","args":{"name":"mock复习笔记.md","content":"# 复习笔记：梯度下降（更新公式 / 学习率 / 局部最小值）"}}\n```',
+  '笔记已保存为 `mock复习笔记.md`，任务完成。\n```tool\n{"tool":"finish","args":{"summary":"已梳理核心概念并产出复习笔记文件"}}\n```',
+];
+let loopTurn = 0;
 
 const AGENT_STEPS = [
   '通读全文后，核心概念有三个：\n\n1. **梯度下降**：沿负梯度方向迭代更新参数\n2. **学习率**：决定每步长度，影响收敛速度与稳定性\n3. **局部最小值**：非凸函数中可能被困住的位置',
@@ -140,6 +149,23 @@ if (/[?&]direct=1/.test(location.search)) {
   } catch (e) {}
 }
 </script>
+<script>
+// 测试台桩：拦截 a[download] 的真实下载（headless 下会让页面挂起），只打日志
+(function () {
+  var origCreate = document.createElement.bind(document);
+  document.createElement = function (tag) {
+    var el = origCreate(tag);
+    if (String(tag).toLowerCase() === 'a') {
+      var origClick = el.click.bind(el);
+      el.click = function () {
+        if (el.hasAttribute('download')) { console.log('[mock] download:', el.download); return; }
+        origClick();
+      };
+    }
+    return el;
+  };
+})();
+</script>
 <script src="/client.js"></script>
 <script>
 (function () {
@@ -212,12 +238,17 @@ if (/[?&]direct=1/.test(location.search)) {
 </script>
 </body></html>`;
 
-/* OpenAI 兼容 SSE：识别 agent 计划/步骤/对话/快捷，返回对应罐头 */
+/* OpenAI 兼容 SSE：识别 agent 计划/循环/对话/快捷，返回对应罐头 */
 function openAiAnswer(messages) {
   const sys = (messages[0] && messages[0].content) || '';
   const user = (messages[messages.length - 1] && messages[messages.length - 1].content) || '';
-  if (/请输出拆解步骤的 JSON/.test(user)) return PLAN_JSON;
-  if (/智能体模式/.test(sys)) {
+  if (/请输出拆解步骤的 JSON/.test(user)) { loopTurn = 0; return PLAN_JSON; }
+  if (/正在自主完成多步任务/.test(sys)) {
+    const i = Math.min(loopTurn, AGENT_LOOP_SCRIPT.length - 1);
+    loopTurn++;
+    return AGENT_LOOP_SCRIPT[i];
+  }
+  if (/当前是第 (\d+)\/(\d+) 步/.test(user)) {   // 旧版逐步协议（/agent 兼容）
     const m = user.match(/当前是第 (\d+)\/(\d+) 步/);
     const idx = m ? parseInt(m[1], 10) - 1 : 0;
     return AGENT_STEPS[idx] || AGENT_STEPS[0];
@@ -249,6 +280,17 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'POST' && pathname === '/chat') { sseHead(res); return sseText(res, CHAT_ANSWER); }
   if (req.method === 'POST' && pathname === '/ask') { sseHead(res); return sseText(res, ASK_ANSWER); }
+  if (req.method === 'POST' && pathname === '/llm') {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      let body = {};
+      try { body = JSON.parse(raw); } catch (e) {}
+      sseHead(res);
+      sseText(res, openAiAnswer(body.messages || []));
+    });
+    return;
+  }
   if (req.method === 'POST' && pathname === '/agent') {
     sseHead(res);
     sseSend(res, { plan: { steps: ['通读文档，提取核心概念', '梳理概念之间的关系', '整理成结构化复习笔记'] } });

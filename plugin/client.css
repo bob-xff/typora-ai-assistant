@@ -674,6 +674,54 @@
 #tyai-root .tyai-step-body pre { background: var(--soft); border: 1px solid var(--line); padding: 10px 12px; border-radius: 10px; overflow-x: auto; }
 #tyai-root .tyai-step-body pre code { background: transparent; padding: 0; }
 
+/* 工具调用卡：模型自主调用的工具，一行一枚，点击展开结果 */
+#tyai-root .tyai-toolcall {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 8px 0 2px;
+  padding: 5px 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+#tyai-root .tyai-toolcall:hover { background: var(--accent-soft-2); }
+#tyai-root .tyai-tool-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  margin-right: 8px;
+  flex: none;
+}
+#tyai-root .tyai-toolcall.fail .tyai-tool-dot { background: var(--err); }
+#tyai-root .tyai-toolcall code {
+  font-family: Consolas, "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--accent-ink);
+  background: transparent;
+  padding: 0;
+}
+#tyai-root .tyai-toolcall i { font-style: normal; color: var(--muted); margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tyai-root .tyai-tool-result {
+  display: none;
+  width: 100%;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--accent-line);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted);
+  font-size: 11px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+#tyai-root .tyai-toolcall.open .tyai-tool-result { display: block; }
+#tyai-root .tyai-agent-hint .tyai-inline-btn { margin-left: 6px; }
+
 @keyframes tyai-pulse {
   50% { box-shadow: 0 0 0 4px rgba(224, 86, 125, 0.16); }
 }

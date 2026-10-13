@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 <#
-    xff助手一号 · 安装脚本 v2.7
+    xff助手一号 · 安装脚本 v2.8
     ------------------------------------------------------------------
     双击同目录的 install.bat 即可（会自动请求管理员权限）。
 
@@ -29,7 +29,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$VERSION      = '2.7'
+$VERSION      = '2.8'
 $PLUGIN_NAME  = 'typora-ai-bridge'
 
 function Say   { param($m, $c) Write-Host "  $m" -ForegroundColor $(if ($c) { $c } else { 'Gray' }) }
