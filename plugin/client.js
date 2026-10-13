@@ -1,5 +1,5 @@
 /* ==========================================================================
-   xff助手一号 · 前端 v2.6
+   xff助手一号 · 前端 v2.7
    --------------------------------------------------------------------------
    兼容性（重要）：目标是 Typora 1.8.3 自带的 Electron 1.8.3 / Chromium 59（2017）。
    禁止使用该内核不认识的东西，否则界面会「错乱」：
@@ -21,7 +21,7 @@
   if (window.__TYPORA_AI_BRIDGE_V3__) return;
   window.__TYPORA_AI_BRIDGE_V3__ = true;
 
-  var VERSION = '2.6';
+  var VERSION = '2.7';
   var PORT = window.__AI_BRIDGE_PORT__ || 8765;
   var TOKEN = window.__AI_BRIDGE_TOKEN__ || '';
   var BASE = 'http://127.0.0.1:' + PORT;
@@ -56,6 +56,12 @@
     model: '<circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 7.5 10 10M17 7.5 14 10M7 16.5 10 14M17 16.5 14 14"/>',
     chevron: '<path d="M9 6l6 6-6 6"/>',
     sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/>',
+    trash: '<path d="M4 7h16M10 4h4a1 1 0 0 1 1 1v2H9V5a1 1 0 0 1 1-1z"/><path d="M6.5 7l.8 12a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9l.8-12"/><path d="M10 11v6M14 11v6"/>',
+    sidebar: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M9.5 4.5v15"/>',
+    save: '<path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 15.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/>',
+    file: '<path d="M6.5 3.5h7l4 4v13a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2z"/><path d="M13.5 3.5v4h4"/>',
   };
 
   function icon(name, size) {
@@ -272,6 +278,68 @@
     return /^(?:https?:\/\/|mailto:|tel:|\/|\.\/|\.\.\/|#)/i.test(String(u)) ? u : '#';
   }
 
+  /* ------------------------------------------------------------------
+   * 轻量 LaTeX → HTML：把常见符号/上下标/分数转成可读形式。
+   * 不引外部渲染器（KaTeX 体积大且对老内核不友好），纯字符串替换，
+   * 所有文本都过 esc()，只放行 <sup>/<sub> 两个标签。
+   * ---------------------------------------------------------------- */
+  var LATEX_SYMBOLS = {
+    alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε', zeta: 'ζ', eta: 'η',
+    theta: 'θ', vartheta: 'ϑ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ',
+    pi: 'π', varpi: 'ϖ', rho: 'ρ', varrho: 'ϱ', sigma: 'σ', varsigma: 'ς', tau: 'τ', upsilon: 'υ',
+    phi: 'φ', varphi: 'ϕ', chi: 'χ', psi: 'ψ', omega: 'ω',
+    Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π', Sigma: 'Σ', Upsilon: 'Υ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+    nabla: '∇', partial: '∂', infty: '∞', sum: '∑', prod: '∏', int: '∫', iint: '∬', oint: '∮',
+    pm: '±', mp: '∓', times: '×', div: '÷', cdot: '⋅', ast: '∗', star: '⋆', circ: '∘', bullet: '∙',
+    approx: '≈', neq: '≠', ne: '≠', leq: '≤', le: '≤', geq: '≥', ge: '≥', ll: '≪', gg: '≫',
+    to: '→', rightarrow: '→', longrightarrow: '→', leftarrow: '←', longleftarrow: '←',
+    leftrightarrow: '↔', longleftrightarrow: '↔', Rightarrow: '⇒', Longrightarrow: '⇒',
+    Leftarrow: '⇐', Leftrightarrow: '⇔', Longleftrightarrow: '⇔', mapsto: '↦', gets: '←', hookrightarrow: '↪',
+    in: '∈', notin: '∉', ni: '∋', subset: '⊂', supset: '⊃', subseteq: '⊆', supseteq: '⊇', cup: '∪', cap: '∩', emptyset: '∅',
+    forall: '∀', exists: '∃', nexists: '∄', neg: '¬', land: '∧', wedge: '∧', lor: '∨', vee: '∨',
+    ldots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱', dots: '…',
+    prime: '′', angle: '∠', deg: '°', prop: '∝', propto: '∝', perp: '⊥', parallel: '∥',
+    sim: '∼', simeq: '≃', cong: '≅', equiv: '≡', asymp: '≍', doteq: '≐',
+    Re: 'ℜ', Im: 'ℑ', aleph: 'ℵ', hbar: 'ℏ', ell: 'ℓ', wp: '℘',
+    sin: 'sin', cos: 'cos', tan: 'tan', cot: 'cot', sec: 'sec', csc: 'csc',
+    log: 'log', ln: 'ln', lg: 'lg', exp: 'exp', lim: 'lim', max: 'max', min: 'min',
+    arg: 'arg', det: 'det', dim: 'dim', deg2: 'deg', gcd: 'gcd', mod: 'mod',
+    mathrm: '', mathit: '', mathbf: '', mathsf: '', mathtt: '', mathcal: '', mathbb: '', mathfrak: '',
+    text: '', textnormal: '', textrm: '', mbox: '', operatorname: '', mathop: '',
+    left: '', right: '', big: '', Big: '', bigg: '', Bigg: '', bigl: '', bigr: '', biggl: '', biggr: '',
+    displaystyle: '', limits: '', nolimits: '', textstyle: '',
+    quad: ' ', qquad: '  ', thinspace: ' ', hspace: ' ', enspace: ' '
+  };
+
+  function latexToHtml(src) {
+    var s = String(src || '');
+    s = s.replace(/\\([%$&#_{}])/g, '$1');                       // 转义的普通字符
+    s = s.replace(/\\[,;:!>]/g, ' ');                            // 间距命令
+    var guard = 0;
+    while (guard++ < 4 && /\\[dt]?frac\s*\{/.test(s)) {          // 分数 → (a)/(b)
+      s = s.replace(/\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, function (m, a, b) {
+        var A = a.length > 1 ? '(' + a + ')' : a;
+        var B = b.length > 1 ? '(' + b + ')' : b;
+        return A + '/' + B;
+      });
+    }
+    s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, function (m, x) { return '√(' + x + ')'; });
+    s = s.replace(/\\sqrt\s*([0-9a-zA-Z])/g, '√$1');
+    s = s.replace(/\\([a-zA-Z]+)/g, function (m, name) {         // 符号 / 未知命令去反斜杠
+      return LATEX_SYMBOLS.hasOwnProperty(name) ? LATEX_SYMBOLS[name] : '';
+    });
+    var tags = [];
+    function T(h) { tags.push(h); return '\u0003' + (tags.length - 1) + '\u0003'; }
+    s = s.replace(/\^\{([^{}]*)\}/g, function (m, x) { return T('<sup>' + x + '</sup>'); });
+    s = s.replace(/\^([0-9a-zA-Z+\-])/g, function (m, x) { return T('<sup>' + x + '</sup>'); });
+    s = s.replace(/_\{([^{}]*)\}/g, function (m, x) { return T('<sub>' + x + '</sub>'); });
+    s = s.replace(/_([0-9a-zA-Z])/g, function (m, x) { return T('<sub>' + x + '</sub>'); });
+    s = s.replace(/[{}]/g, '');
+    s = s.replace(/\\/g, '');
+    s = esc(s);
+    return s.replace(/\u0003(\d+)\u0003/g, function (_, n) { return tags[+n]; });
+  }
+
   function inline(s) {
     return s
       .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -292,8 +360,24 @@
     function slot(html) { slots.push(html); return '\u0001' + (slots.length - 1) + '\u0001'; }
 
     var text = String(src);
+    // 代码块：语言标签 + 复制按钮（代码先 esc 再进 data-code，读取时浏览器自动还原实体）
     text = text.replace(/```[^\n]*\n?([\s\S]*?)```/g, function (m, code) {
-      return '\n' + slot('<pre><code>' + esc(code.replace(/\n$/, '')) + '</code></pre>') + '\n';
+      var lang = (m.match(/```([^\n`]*)/) || [])[1].trim();
+      var body = esc(code.replace(/\n$/, ''));
+      return '\n' + slot(
+        '<div class="tyai-code">' +
+        '<div class="tyai-code-bar"><span>' + esc(lang || '代码') + '</span>' +
+        '<button type="button" class="tyai-code-copy" data-code="' + body + '">复制</button></div>' +
+        '<pre><code>' + body + '</code></pre></div>'
+      ) + '\n';
+    });
+    // 数学公式：$$...$$ 块级、$...$ 行内（LaTeX 转成可读符号，样式化展示；
+    // 行内公式要求含 LaTeX 特征字符，避免把「$5 到 $10」这类误判为公式）
+    text = text.replace(/\$\$([\s\S]+?)\$\$/g, function (m, f) {
+      return '\n' + slot('<div class="tyai-math tyai-math-block">' + latexToHtml(f.trim()) + '</div>') + '\n';
+    });
+    text = text.replace(/\$([^$\n]+)\$/g, function (m, f) {
+      return /[\\^_{}]/.test(f) ? slot('<span class="tyai-math">' + latexToHtml(f) + '</span>') : m;
     });
     // 仅保留 details/summary 的开合标签本身，剥离全部属性（防 ontoggle 等事件属性注入）
     text = text.replace(/<\/?(details|summary)[^>]*>/gi, function (m, name) {
@@ -351,6 +435,46 @@
     }
     closeList();
     return out.join('\n').replace(/\u0001(\d+)\u0001/g, function (_, n) { return slots[+n]; });
+  }
+
+  /* ------------------------------------------------------------------
+   * 流式渲染节流：模型每个 delta 都全量重渲染长文本会越算越卡（O(n²)）。
+   * 这里按 60ms 合批，收尾时必须用 flushStream 保证最终状态精确。
+   * ---------------------------------------------------------------- */
+  var streamPaint = { el: null, html: '', timer: null, last: 0 };
+
+  function paintStream(el, html, scrollEl) {
+    if (!el) return;
+    var now = Date.now();
+    if (el !== streamPaint.el) {           // 换了渲染目标（新的回答/新的步骤）：立即画
+      if (streamPaint.timer) { clearTimeout(streamPaint.timer); streamPaint.timer = null; }
+      streamPaint.el = el; streamPaint.html = html; streamPaint.last = now;
+      el.innerHTML = html;
+      if (scrollEl) scrollBottom(scrollEl);
+      return;
+    }
+    streamPaint.html = html;
+    if (now - streamPaint.last >= 60) {
+      if (streamPaint.timer) { clearTimeout(streamPaint.timer); streamPaint.timer = null; }
+      streamPaint.last = now;
+      el.innerHTML = html;
+      if (scrollEl) scrollBottom(scrollEl);
+    } else if (!streamPaint.timer) {
+      streamPaint.timer = setTimeout(function () {
+        streamPaint.timer = null;
+        streamPaint.last = Date.now();
+        if (streamPaint.el) {
+          streamPaint.el.innerHTML = streamPaint.html;
+          if (scrollEl) scrollBottom(scrollEl);
+        }
+      }, 60 - (now - streamPaint.last));
+    }
+  }
+
+  function flushStream(el, html) {
+    if (streamPaint.timer) { clearTimeout(streamPaint.timer); streamPaint.timer = null; }
+    streamPaint.el = el; streamPaint.html = html; streamPaint.last = Date.now();
+    if (el) el.innerHTML = html;
   }
 
   /* ======================================================================
@@ -1081,11 +1205,26 @@
 
       '<div id="tyai-panel" class="tyai-panel">' +
 
+      // ---------- 左侧：历史会话栏（仿主流 AI：常驻、可搜索、可滚动） ----------
+      '  <div class="tyai-main">' +
+      '    <aside class="tyai-side" id="tyai-side">' +
+      '      <div class="tyai-side-top">' +
+      '        <button class="tyai-side-new" id="tyai-side-new">' + icon('plus', 14) + '<span>新对话</span></button>' +
+      '        <button class="tyai-icobtn" id="tyai-side-fold" title="收起会话栏">' + icon('sidebar', 15) + '</button>' +
+      '      </div>' +
+      '      <div class="tyai-side-search">' + icon('search', 13) +
+      '        <input id="tyai-side-q" type="text" placeholder="搜索历史会话" spellcheck="false">' +
+      '      </div>' +
+      '      <div class="tyai-scroll tyai-side-list" id="tyai-side-list"></div>' +
+      '    </aside>' +
+
+      '    <div class="tyai-content">' +
+
       '  <div class="tyai-head">' +
+      '    <button class="tyai-icobtn" id="tyai-side-unfold" title="展开会话栏">' + icon('sidebar', 16) + '</button>' +
       '    <span class="tyai-logo">' + logoMark(26) + '</span>' +
       '    <span class="tyai-title">xff助手一号</span>' +
       '    <span class="tyai-status" id="tyai-status">连接中…</span>' +
-      '    <button class="tyai-icobtn" id="tyai-sess-btn" title="历史会话">' + icon('history', 17) + '</button>' +
       '    <span class="tyai-x" id="tyai-close" title="关闭">' + icon('x', 16) + '</span>' +
       '  </div>' +
 
@@ -1132,6 +1271,7 @@
       '  <div class="tyai-foot">' +
       '    <div class="tyai-actions" id="tyai-actions">' +
       '      <button data-act="copy">' + icon('copy', 14) + '复制</button>' +
+      '      <button data-act="save">' + icon('save', 14) + '存为 .md</button>' +
       '      <button data-act="insert">' + icon('insert', 14) + '插入文档</button>' +
       '      <button data-act="redo">' + icon('redo', 14) + '重新生成</button>' +
       '    </div>' +
@@ -1149,9 +1289,11 @@
       '    </div>' +
       '  </div>' +
 
-      // ---------- 弹层：模型 / 会话 ----------
+      '    </div>' +   // /.tyai-content
+      '  </div>' +     // /.tyai-main
+
+      // ---------- 弹层：模型 ----------
       '  <div class="tyai-pop" id="tyai-pop-model" hidden></div>' +
-      '  <div class="tyai-pop" id="tyai-pop-sess" hidden></div>' +
 
       // ---------- 设置抽屉 ----------
       '  <div class="tyai-sheet" id="tyai-sheet" hidden>' +
@@ -1199,8 +1341,15 @@
     els.actions = $('tyai-actions');
     els.modelName = $('tyai-model-name');
     els.popModel = $('tyai-pop-model');
-    els.popSess = $('tyai-pop-sess');
     els.sheet = $('tyai-sheet');
+    els.side = $('tyai-side');
+    els.sideList = $('tyai-side-list');
+    els.sideQ = $('tyai-side-q');
+    // 会话栏展开状态（持久化；窄屏默认收起，避免主区被挤没）
+    var sideSaved = null;
+    try { sideSaved = localStorage.getItem('tyai.side'); } catch (e) {}
+    var sideOn = sideSaved === null ? (window.innerWidth || 0) > 620 : sideSaved === '1';
+    panel.classList.toggle('side-on', !!sideOn);
     $('tyai-kernel-note').textContent =
       '运行环境：' + KERNEL.label + '（' + (KERNEL.modern ? '完整形态' : '兼容形态') + '）';
 
@@ -1280,23 +1429,75 @@
     $('tyai-sheet-close').addEventListener('click', closeSheet);
     $('tyai-sheet-mask').addEventListener('click', closeSheet);
 
-    // 会话
-    $('tyai-sess-btn').addEventListener('click', function (e) { e.stopPropagation(); toggleSessPop(); });
-
     // 结果操作
     els.actions.addEventListener('click', function (e) {
       var btn = e.target.closest('button[data-act]');
       if (!btn) return;
       var act = btn.getAttribute('data-act');
       if (act === 'copy') copyText(currentResultText());
+      else if (act === 'save') saveMarkdown(currentResultText(), suggestMdName());
       else if (act === 'insert') insertToDoc(currentResultText());
       else if (act === 'redo') redoCurrent();
     });
 
-    // 智能体快捷词
+    // 智能体快捷词：点一下就直接开跑（不再只填输入框，避免"点了没反应"）
     $('tyai-chips').addEventListener('click', function (e) {
       var chip = e.target.closest('.tyai-chip');
-      if (chip) { composerInput.value = chip.textContent; composerInput.focus(); autoGrow(); }
+      if (!chip) return;
+      var text = chip.textContent;
+      if (state.busy) { flash('正在生成中，先等当前任务完成或点停止'); return; }
+      composerInput.value = '';
+      composerInput.style.height = 'auto';
+      runAgent(text);
+    });
+
+    // ---------- 历史会话栏 ----------
+    $('tyai-side-new').addEventListener('click', function () {
+      var s = newSession('新对话');
+      state.sessions.unshift(s);
+      state.curId = s.id;
+      saveSessions();
+      renderSideList();
+      renderChat();
+      if (state.tab !== 'chat') switchTab('chat');
+      composerInput.focus();
+    });
+    $('tyai-side-fold').addEventListener('click', function () { setSideOpen(false); });
+    $('tyai-side-unfold').addEventListener('click', function () { setSideOpen(true); });
+    els.sideQ.addEventListener('input', renderSideList);
+    els.sideQ.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { this.value = ''; renderSideList(); e.stopPropagation(); }
+    });
+    els.sideList.addEventListener('click', function (e) {
+      var del = e.target.closest('.tyai-side-del');
+      if (del) {
+        e.stopPropagation();
+        deleteSession(del.getAttribute('data-id'));
+        return;
+      }
+      var item = e.target.closest('.tyai-side-item');
+      if (!item) return;
+      var id = item.getAttribute('data-id');
+      if (id === state.curId) return;
+      state.curId = id;
+      saveSessions();
+      renderSideList();
+      renderChat();
+    });
+
+    // 消息流内嵌按钮：单条复制 + 代码块复制（独立类名 + 容器委托，避免被通用处理器误接）
+    els.msgs.addEventListener('click', function (e) {
+      var codeBtn = e.target.closest('.tyai-code-copy');
+      if (codeBtn) { copyText(codeBtn.getAttribute('data-code') || ''); return; }
+      var msgBtn = e.target.closest('.tyai-msg-copy');
+      if (!msgBtn) return;
+      var msg = msgBtn.closest('.tyai-msg');
+      var textEl = msg && msg.querySelector('.tyai-msg-text');
+      if (textEl) copyText(textEl.innerText || textEl.textContent || '');
+    });
+    els.timeline.addEventListener('click', function (e) {
+      var codeBtn = e.target.closest('.tyai-code-copy');
+      if (codeBtn) copyText(codeBtn.getAttribute('data-code') || '');
     });
 
     // 快捷场景
@@ -1308,7 +1509,6 @@
     // 点空白关闭弹层
     document.addEventListener('mousedown', function (e) {
       if (!els.popModel.hidden && !els.popModel.contains(e.target) && !$('tyai-model-pill').contains(e.target)) els.popModel.hidden = true;
-      if (!els.popSess.hidden && !els.popSess.contains(e.target) && !$('tyai-sess-btn').contains(e.target)) els.popSess.hidden = true;
       if (bubble.classList.contains('on') && !bubble.contains(e.target)) hideBubble();
     });
 
@@ -1321,7 +1521,7 @@
       }
       if (e.key === 'Escape') {
         if (bubble.classList.contains('on')) hideBubble();
-        else if (!els.popModel.hidden || !els.popSess.hidden) { els.popModel.hidden = true; els.popSess.hidden = true; }
+        else if (!els.popModel.hidden) els.popModel.hidden = true;
         else if (!els.sheet.hidden) closeSheet();
         else if (state.open) togglePanel(false);
       }
@@ -1346,7 +1546,6 @@
 
   function toggleModelPop() {
     if (!els.popModel.hidden) { els.popModel.hidden = true; return; }
-    els.popSess.hidden = true;
     renderModelPop();
     els.popModel.hidden = false;
   }
@@ -1440,7 +1639,6 @@
 
   function openSheet(presetProvider) {
     els.popModel.hidden = true;
-    els.popSess.hidden = true;
 
     sheetProvider = presetProvider || CFG.provider || 'custom';
     renderProviderOpts();
@@ -1581,49 +1779,54 @@
 
   /* ---------------------------- 会话弹层 ---------------------------- */
 
-  function toggleSessPop() {
-    if (!els.popSess.hidden) { els.popSess.hidden = true; return; }
-    els.popModel.hidden = true;
-    renderSessPop();
-    els.popSess.hidden = false;
+  /* ---------------------------- 历史会话栏 ---------------------------- */
+
+  function setSideOpen(on) {
+    panel.classList.toggle('side-on', !!on);
+    try { localStorage.setItem('tyai.side', on ? '1' : '0'); } catch (e) {}
+    if (on) renderSideList();
   }
 
-  function renderSessPop() {
-    els.popSess.innerHTML =
-      '<div class="tyai-pop-title">历史会话<button class="tyai-pop-new" id="tyai-sess-new">＋ 新建</button></div>' +
-      '<div class="tyai-sess-list">' + state.sessions.map(function (s) {
-        return '<div class="tyai-sess-item' + (s.id === state.curId ? ' on' : '') + '" data-id="' + s.id + '">' +
-          '<span>' + esc(s.title) + '</span><i>' + new Date(s.ts).toLocaleDateString() + '</i></div>';
-      }).join('') + '</div>' +
-      '<div class="tyai-pop-sep"></div>' +
-      '<button class="tyai-pop-item" id="tyai-sess-del">' + icon('x', 14) + '<span>删除当前会话</span></button>';
+  function fmtTime(ts) {
+    var d = new Date(ts || Date.now());
+    var now = new Date();
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    if (d.toDateString() === now.toDateString()) return p(d.getHours()) + ':' + p(d.getMinutes());
+    if (d.getFullYear() === now.getFullYear()) return p(d.getMonth() + 1) + '-' + p(d.getDate());
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
 
-    $('tyai-sess-new').addEventListener('click', function (e) {
-      e.stopPropagation();
-      var s = newSession('新对话');
-      state.sessions.unshift(s);
-      state.curId = s.id;
-      saveSessions();
-      renderChat();
-      els.popSess.hidden = true;
-      composerInput.focus();
+  function renderSideList() {
+    if (!els.sideList) return;
+    var q = (els.sideQ && els.sideQ.value || '').trim().toLowerCase();
+    var list = state.sessions.filter(function (s) {
+      return !q || String(s.title || '').toLowerCase().indexOf(q) >= 0;
     });
-    $('tyai-sess-del').addEventListener('click', function () {
-      if (state.sessions.length <= 1) state.sessions = [newSession('新对话')];
-      else state.sessions = state.sessions.filter(function (s) { return s.id !== state.curId; });
-      state.curId = state.sessions[0].id;
-      saveSessions();
-      renderChat();
-      els.popSess.hidden = true;
-    });
-    els.popSess.querySelectorAll('.tyai-sess-item').forEach(function (item) {
-      item.addEventListener('click', function () {
-        state.curId = item.getAttribute('data-id');
-        saveSessions();
-        renderChat();
-        els.popSess.hidden = true;
-      });
-    });
+    if (!list.length) {
+      els.sideList.innerHTML = '<div class="tyai-side-empty">' + (q ? '没有匹配的会话' : '还没有历史会话') + '</div>';
+      return;
+    }
+    els.sideList.innerHTML = list.map(function (s) {
+      return '<div class="tyai-side-item' + (s.id === state.curId ? ' on' : '') + '" data-id="' + s.id + '">' +
+        '<div class="tyai-side-item-tx"><b>' + esc(s.title || '新对话') + '</b>' +
+        '<i>' + fmtTime(s.ts) + ' · ' + (s.messages ? s.messages.length : 0) + ' 条</i></div>' +
+        '<button type="button" class="tyai-side-del" data-id="' + s.id + '" title="删除会话">' + icon('trash', 12) + '</button>' +
+        '</div>';
+    }).join('');
+  }
+
+  function deleteSession(id) {
+    var idx = -1;
+    for (var i = 0; i < state.sessions.length; i++) if (state.sessions[i].id === id) { idx = i; break; }
+    if (idx < 0) return;
+    var wasCur = state.sessions[idx].id === state.curId;
+    state.sessions.splice(idx, 1);
+    if (!state.sessions.length) state.sessions.push(newSession('新对话'));
+    if (wasCur || !curSession()) state.curId = state.sessions[0].id;
+    saveSessions();
+    renderSideList();
+    if (wasCur) { renderChat(); if (state.tab !== 'chat') switchTab('chat'); }
+    flash('已删除会话');
   }
 
   /* ---------------------------- 选中浮窗 ---------------------------- */
@@ -1670,7 +1873,6 @@
     if (state.open) {
       hideBubble();
       els.popModel.hidden = true;
-      els.popSess.hidden = true;
       composerInput.focus();
       // 首次使用且确实没有可用 Key 时，主动弹出配置（桥接模式下 Key 在服务端，不需要）
       if (MODE === 'direct' && !hasKey() && !localStorage.getItem('tyai.onboarded')) {
@@ -1758,13 +1960,72 @@
   }
 
   function updateActions() {
-    els.actions.classList.toggle('on', !!currentResultText());
+    var has = !!currentResultText();
+    els.actions.classList.toggle('on', has);
+    // 「存为 .md」只在智能体模式展示（对话/快捷结果用复制与插入文档更顺手）
+    var saveBtn = els.actions.querySelector('[data-act="save"]');
+    if (saveBtn) saveBtn.style.display = (state.tab === 'agent' && has) ? '' : 'none';
+  }
+
+  /* ---------- 导出 Markdown 文件 ---------- */
+
+  function suggestMdName() {
+    var base = 'AI助手';
+    try {
+      var p = getFilePath();
+      if (p) base = String(p).replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '') || base;
+    } catch (e) {}
+    return base + '-AI笔记.md';
+  }
+
+  function saveMarkdown(text, name) {
+    if (!text) { flash('没有可保存的内容'); return; }
+    name = name || 'AI助手笔记.md';
+    var node = window.reqnode;
+    // 1) Typora/Electron 环境：系统保存对话框 + fs 落盘
+    if (node) {
+      try {
+        var electron = node('electron');
+        var fs = node('fs');
+        var dlg = (electron.remote && electron.remote.dialog) || electron.dialog;
+        if (dlg && typeof dlg.showSaveDialog === 'function' && fs) {
+          var onPicked = function (r) {
+            var p = r && (r.filePath || (r.filePaths && r.filePaths[0]));
+            if (!p) { flash('已取消保存'); return; }
+            try {
+              fs.writeFileSync(p, text, 'utf8');
+              flash('已保存：' + p);
+            } catch (e) { flash('保存失败：' + e.message); }
+          };
+          var ret = dlg.showSaveDialog({ title: '保存 Markdown', defaultPath: name });
+          if (ret && typeof ret.then === 'function') ret.then(onPicked, function () { flash('已取消保存'); });
+          else onPicked(ret);
+          return;
+        }
+      } catch (e) {}
+    }
+    // 2) 降级：触发下载（a[download]）
+    try {
+      var blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      flash('已触发下载：' + name);
+      return;
+    } catch (e) {}
+    // 3) 再降级：复制
+    copyText(text);
+    flash('当前环境不能保存文件，已复制内容');
   }
 
   /* ---------------------------- 对话模式 ---------------------------- */
 
   function renderChat() {
     var s = curSession();
+    renderSideList();
     if (!s.messages.length) {
       els.msgs.innerHTML = homeHTML();
       updateActions();
@@ -1781,7 +2042,9 @@
       '<div class="tyai-msg-avatar">' + (isUser ? '你' : logoMark(24)) + '</div>' +
       '<div class="tyai-msg-body"><div class="tyai-msg-text">' +
       (isUser ? '<p>' + esc(content).replace(/\n/g, '<br>') + '</p>' : mdToHtml(content)) +
-      '</div></div></div>';
+      '</div>' +
+      '<button type="button" class="tyai-msg-copy" title="复制这条内容">' + icon('copy', 12) + '</button>' +
+      '</div></div>';
   }
 
   function scrollBottom(el) { el.scrollTop = el.scrollHeight; }
@@ -1791,9 +2054,11 @@
     if (!q || state.busy) return;
     var s = curSession();
     s.messages.push({ role: 'user', content: q });
-    if (s.messages.length === 1) s.title = q.slice(0, 18) || '新对话';
+    var titled = false;
+    if (s.messages.length === 1) { s.title = q.slice(0, 18) || '新对话'; titled = true; }
     if (s.messages.length > MAX_TURNS) s.messages = s.messages.slice(-MAX_TURNS);
     saveSessions();
+    if (titled) renderSideList();
 
     if (els.msgs.querySelector('.tyai-home')) els.msgs.innerHTML = '';
     els.msgs.insertAdjacentHTML('beforeend', msgHTML('user', q, s.messages.length - 1));
@@ -1804,7 +2069,8 @@
     var idx = s.messages.length;
     els.msgs.insertAdjacentHTML('beforeend',
       '<div class="tyai-msg tyai-msg-assistant" data-idx="' + idx + '"><div class="tyai-msg-avatar">' + logoMark(24) + '</div>' +
-      '<div class="tyai-msg-body"><div class="tyai-msg-text"><div class="tyai-loading"><span></span><span></span><span></span></div></div></div></div>');
+      '<div class="tyai-msg-body"><div class="tyai-msg-text"><div class="tyai-loading"><span></span><span></span><span></span></div></div>' +
+      '<button type="button" class="tyai-msg-copy" title="复制这条内容">' + icon('copy', 12) + '</button></div></div>');
     var textEl = els.msgs.querySelector('[data-idx="' + idx + '"] .tyai-msg-text');
     scrollBottom(els.msgs);
     updateActions();
@@ -1820,19 +2086,20 @@
       onFinish: function () { setBusy(false); updateActions(); },
       onDelta: function (d) {
         acc += d;
-        textEl.innerHTML = mdToHtml(acc);
-        scrollBottom(els.msgs);
+        paintStream(textEl, mdToHtml(acc), els.msgs);
       },
       onError: function (err) {
-        if (needsSetup(err)) { textEl.innerHTML = '<div class="tyai-err">' + esc(errText(err)) + '<button class="tyai-inline-btn" data-open-cfg="1">去配置</button></div>'; }
-        else textEl.innerHTML = '<div class="tyai-err">' + esc(errText(err)) + '</div>';
+        if (needsSetup(err)) { flushStream(textEl, '<div class="tyai-err">' + esc(errText(err)) + '<button class="tyai-inline-btn" data-open-cfg="1">去配置</button></div>'); }
+        else flushStream(textEl, '<div class="tyai-err">' + esc(errText(err)) + '</div>');
         if (acc) s.messages.push({ role: 'assistant', content: acc });
         saveSessions();
+        renderSideList();
       },
       onEnd: function () {
         if (acc) s.messages.push({ role: 'assistant', content: acc });
-        else if (!textEl.querySelector('.tyai-err')) textEl.innerHTML = '<p class="tyai-empty">模型没有返回内容。</p>';
+        else if (!textEl.querySelector('.tyai-err')) flushStream(textEl, '<p class="tyai-empty">模型没有返回内容。</p>');
         saveSessions();
+        renderSideList();
         updateActions();
       },
     });
@@ -1861,6 +2128,7 @@
 
     var stepCards = {};
     var currentTextEl = null;
+    var currentStep = -1;
 
     state.abort = aiPost('/agent', {
       task: task,
@@ -1871,6 +2139,7 @@
         $('tyai-agent-hint').textContent = '拆成 ' + plan.steps.length + ' 步：' + plan.steps.join(' → ');
       },
       onStepStart: function (s) {
+        currentStep = s.i;
         els.timeline.insertAdjacentHTML('beforeend',
           '<div class="tyai-step" data-step="' + s.i + '">' +
           '<div class="tyai-step-head"><span class="tyai-step-dot"></span><b>' + (s.i + 1) + '/' + s.total + ' · ' + esc(s.title) + '</b>' +
@@ -1883,8 +2152,7 @@
       onDelta: function (d, step) {
         if (currentTextEl && step != null) {
           state.agentResult[step] = (state.agentResult[step] || '') + d;
-          currentTextEl.innerHTML = mdToHtml(state.agentResult[step]);
-          scrollBottom(els.timeline);
+          paintStream(currentTextEl, mdToHtml(state.agentResult[step]), els.timeline);
         }
       },
       onStepEnd: function (s) {
@@ -1892,15 +2160,20 @@
         if (card) card.querySelector('.tyai-step-dot').classList.add('done');
       },
       onError: function (err) {
-        if (needsSetup(err)) {
-          els.timeline.insertAdjacentHTML('beforeend', '<div class="tyai-err">' + esc(errText(err)) + '<button class="tyai-inline-btn" data-open-cfg="1">去配置</button></div>');
-          return;
+        var html = '<div class="tyai-err">' + esc(errText(err)) +
+          (needsSetup(err) ? '<button class="tyai-inline-btn" data-open-cfg="1">去配置</button>' : '') + '</div>';
+        // 计划阶段（还没有任何步骤卡）失败时，错误也必须可见 —— 否则用户侧看就是"点了没反应"
+        if (currentTextEl && stepCards[currentStep]) currentTextEl.insertAdjacentHTML('beforeend', html);
+        else els.timeline.insertAdjacentHTML('beforeend', html);
+        if (currentTextEl && stepCards[currentStep]) {
+          var card = stepCards[currentStep];
+          if (card) card.querySelector('.tyai-step-dot').classList.add('fail');
         }
-        if (currentTextEl) currentTextEl.insertAdjacentHTML('beforeend', '<div class="tyai-err">' + esc(errText(err)) + '</div>');
+        scrollBottom(els.timeline);
       },
       onFinish: function () { setBusy(false); updateActions(); },
       onEnd: function () {
-        if (!els.timeline.querySelector('.tyai-step')) {
+        if (!els.timeline.querySelector('.tyai-step') && !els.timeline.querySelector('.tyai-err')) {
           els.timeline.innerHTML = '<div class="tyai-err">任务没有产出，请重试。</div>';
         }
         updateActions();
@@ -1949,8 +2222,7 @@
       onFinish: function () { setBusy(false); updateActions(); },
       onDelta: function (d) {
         state.lastResult += d;
-        els.quickResult.innerHTML = mdToHtml(state.lastResult) || '<p class="tyai-empty">…</p>';
-        els.quickResult.scrollTop = els.quickResult.scrollHeight;
+        paintStream(els.quickResult, mdToHtml(state.lastResult) || '<p class="tyai-empty">…</p>', els.quickResult);
         updateActions();
       },
       onError: function (err) { showQuickError(errText(err)); },
@@ -2008,11 +2280,14 @@
       onFinish: function () { setBusy(false); updateActions(); },
       onDelta: function (d) {
         state.lastResult += d;
-        els.quickResult.innerHTML = mdToHtml(state.lastResult);
-        els.quickResult.scrollTop = els.quickResult.scrollHeight;
+        paintStream(els.quickResult, mdToHtml(state.lastResult), els.quickResult);
         updateActions();
       },
       onError: function (err) { showQuickError(errText(err)); },
+      onEnd: function () {
+        if (!state.lastResult && !els.quickResult.querySelector('.tyai-err')) showQuickError('模型没有返回内容，请重试。');
+        updateActions();
+      },
     });
   }
 

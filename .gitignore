@@ -24,3 +24,5 @@ Thumbs.db
 scripts/*
 !scripts/xss-probe.js
 !scripts/compat-check.js
+!scripts/mock_server.js
+!scripts/test-save-md.js

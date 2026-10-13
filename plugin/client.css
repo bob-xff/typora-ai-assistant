@@ -1,5 +1,5 @@
 /* ==========================================================================
-   xff助手一号 · 界面样式 v2.6
+   xff助手一号 · 界面样式 v2.7
    设计语言：以「淡粉」为主色的清爽纸感界面 —— 纯色、零渐变；
             白色面板 + 粉色柔面卡片、大圆角、极细分割线、
             玫瑰粉作强调与主按钮；深浅主题跟随 Typora。
@@ -100,7 +100,7 @@
   top: 14px;
   right: 14px;
   bottom: 14px;
-  width: 428px;
+  width: 380px;
   max-width: calc(100vw - 28px);
   z-index: 2147483590;
   display: flex;
@@ -113,11 +113,131 @@
   opacity: 0;
   transform: translateX(20px) scale(0.985);
   pointer-events: none;
-  transition: opacity 0.18s ease, transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity 0.18s ease, transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), width 0.2s ease;
   overflow: hidden;
 }
 
+/* 会话栏展开时加宽（历史记录常驻左侧，仿主流 AI 客户端） */
+#tyai-root .tyai-panel.side-on { width: 480px; }
+
 #tyai-root .tyai-panel.on { opacity: 1; transform: none; pointer-events: auto; }
+
+/* ---------- 面板主体：会话栏 + 内容区 ---------- */
+
+#tyai-root .tyai-main { flex: 1; min-height: 0; display: flex; }
+
+#tyai-root .tyai-side {
+  width: 146px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--soft);
+  border-right: 1px solid var(--line);
+}
+
+#tyai-root .tyai-panel:not(.side-on) .tyai-side { display: none; }
+
+#tyai-root .tyai-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+#tyai-root .tyai-side-top { display: flex; align-items: center; padding: 10px 10px 8px; flex: none; }
+
+#tyai-root .tyai-side-new {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: var(--ink);
+  color: var(--ink-fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 4px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+#tyai-root .tyai-side-new svg { margin-right: 5px; }
+#tyai-root .tyai-side-new:hover { background: var(--accent-ink); }
+#tyai-root .tyai-side-top .tyai-icobtn { margin-left: 6px; }
+
+#tyai-root .tyai-side-search {
+  display: flex;
+  align-items: center;
+  margin: 0 10px 8px;
+  padding: 0 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  flex: none;
+  transition: border-color 0.15s ease;
+}
+
+#tyai-root .tyai-side-search svg { color: var(--muted); flex: none; }
+#tyai-root .tyai-side-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  padding: 6px 0 6px 6px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+#tyai-root .tyai-side-list { flex: 1; padding: 0 8px 10px; }
+
+#tyai-root .tyai-side-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 9px;
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.15s ease;
+}
+
+#tyai-root .tyai-side-item:hover { background: var(--accent-soft); }
+#tyai-root .tyai-side-item.on { background: var(--accent-soft-2); }
+#tyai-root .tyai-side-item.on .tyai-side-item-tx b { color: var(--accent-ink); font-weight: 600; }
+
+#tyai-root .tyai-side-item-tx { flex: 1; min-width: 0; }
+#tyai-root .tyai-side-item-tx b {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#tyai-root .tyai-side-item-tx i { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+
+#tyai-root .tyai-side-del {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+#tyai-root .tyai-side-item:hover .tyai-side-del { opacity: 1; }
+#tyai-root .tyai-side-del:hover { color: var(--err); background: var(--surface); }
+
+#tyai-root .tyai-side-empty { text-align: center; color: var(--muted); font-size: 11.5px; padding: 20px 8px; line-height: 1.5; }
+
+/* 会话栏收起时，头部显示展开按钮 */
+#tyai-root #tyai-side-unfold { display: none; }
+#tyai-root .tyai-panel:not(.side-on) #tyai-side-unfold { display: inline-flex; }
+#tyai-root .tyai-panel.side-on #tyai-side-unfold { display: none; }
 
 /* ---------- 头部 ---------- */
 
@@ -309,7 +429,7 @@
 
 #tyai-root .tyai-msgs { flex: 1; padding: 4px 16px 8px; }
 
-#tyai-root .tyai-msg { display: flex; margin-bottom: 16px; }
+#tyai-root .tyai-msg { display: flex; margin-bottom: 16px; position: relative; }
 
 #tyai-root .tyai-msg-avatar {
   flex: none;
@@ -341,7 +461,34 @@
   max-width: 86%;
 }
 
-#tyai-root .tyai-msg-assistant .tyai-msg-text { padding: 2px 0 0; }
+/* 助手消息同样装进"框"里：和用户的粉色气泡对称，你一条我一条一眼可辨 */
+#tyai-root .tyai-msg-assistant .tyai-msg-text {
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 4px 13px 13px 13px;
+  padding: 9px 13px;
+  margin-right: 30px;
+  box-shadow: 0 1px 2px rgba(90, 30, 50, 0.04);
+}
+
+/* 单条消息的复制按钮：悬停整条消息时出现 */
+#tyai-root .tyai-msg-copy {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  border: 0;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 7px;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+#tyai-root .tyai-msg:hover .tyai-msg-copy { opacity: 1; }
+#tyai-root .tyai-msg-copy:hover { color: var(--accent-ink); background: var(--accent-soft); }
+#tyai-root .tyai-msg-user .tyai-msg-copy { right: auto; left: 0; }
 
 /* 消息内 Markdown */
 #tyai-root .tyai-msg-text > :first-child { margin-top: 0; }
@@ -377,6 +524,63 @@
   margin: 0.6em 0;
 }
 #tyai-root .tyai-msg-text pre code { background: transparent; color: inherit; padding: 0; font-size: 12px; line-height: 1.55; }
+
+/* 代码块外壳：语言标签 + 复制按钮（mdToHtml 生成的 .tyai-code 包裹 pre） */
+#tyai-root .tyai-code {
+  margin: 0.6em 0;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  overflow: hidden;
+  background: var(--soft);
+}
+#tyai-root .tyai-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 4px 11px;
+  background: var(--soft-2);
+  font-size: 11px;
+  color: var(--muted);
+}
+#tyai-root .tyai-code-copy {
+  border: 0;
+  background: transparent;
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 7px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+#tyai-root .tyai-code-copy:hover { background: var(--accent-soft); }
+#tyai-root .tyai-code pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* 数学公式：LaTeX 转成可读符号后样式化展示（不引外部渲染器，保证离线可用） */
+#tyai-root .tyai-math {
+  font-family: "Cambria Math", Georgia, "Times New Roman", serif;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+#tyai-root .tyai-math sup, #tyai-root .tyai-math sub { font-size: 0.72em; }
+#tyai-root .tyai-math-block {
+  display: block;
+  margin: 0.6em 0;
+  padding: 8px 12px;
+  background: var(--accent-soft);
+  border-left: 2px solid var(--accent-line);
+  border-radius: 8px;
+  font-size: 1.05em;
+  overflow-x: auto;
+  white-space: nowrap;
+}
 #tyai-root .tyai-msg-text table { border-collapse: collapse; margin: 0.6em 0; font-size: 0.94em; width: 100%; }
 #tyai-root .tyai-msg-text th, #tyai-root .tyai-msg-text td {
   border: 1px solid var(--line);
@@ -459,6 +663,7 @@
 }
 
 #tyai-root .tyai-step-dot.done { background: var(--ok); animation: none; }
+#tyai-root .tyai-step-dot.fail { background: var(--err); animation: none; }
 #tyai-root .tyai-step-body { margin-top: 8px; font-size: 12.8px; }
 #tyai-root .tyai-step-body > :first-child { margin-top: 0; }
 #tyai-root .tyai-step-body > :last-child { margin-bottom: 0; }
@@ -767,23 +972,6 @@
 #tyai-root .tyai-pop-others[hidden] { display: none; }
 
 #tyai-root .tyai-pop-sep { height: 1px; background: var(--line); margin: 6px 8px; }
-
-#tyai-root .tyai-sess-list { max-height: 220px; overflow-y: auto; }
-
-#tyai-root .tyai-sess-item {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 8px 10px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 12.5px;
-}
-
-#tyai-root .tyai-sess-item:hover { background: var(--accent-soft); }
-#tyai-root .tyai-sess-item.on { color: var(--accent-ink); font-weight: 600; }
-#tyai-root .tyai-sess-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#tyai-root .tyai-sess-item i { font-style: normal; font-size: 10.5px; color: var(--muted); flex: none; }
 
 /* ---------- 设置抽屉 ---------- */
 
@@ -1156,7 +1344,6 @@
 #tyai-root .tyai-status:before { margin-right: 5px; }
 #tyai-root .tyai-pop-item > *:not(:last-child) { margin-right: 8px; }
 #tyai-root .tyai-pop-toggle > *:not(:last-child) { margin-right: 8px; }
-#tyai-root .tyai-sess-item > *:not(:last-child) { margin-right: 10px; }
 #tyai-root .tyai-keywrap > *:not(:last-child) { margin-right: 4px; }
 #tyai-root .tyai-sheet-foot > button:not(:last-child) { margin-right: 8px; }
 #tyai-root .tyai-loading > span:not(:last-child) { margin-right: 4px; }

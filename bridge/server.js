@@ -490,7 +490,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         ok: true,
         service: 'typora-ai-bridge',
-        version: '2.6',
+        version: '2.7',
         provider: CONFIG.provider,
         model: CONFIG.model,
         baseUrl: CONFIG.baseUrl,
