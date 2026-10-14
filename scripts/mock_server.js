@@ -53,12 +53,6 @@ const AGENT_LOOP_SCRIPT = [
 ];
 let loopTurn = 0;
 
-const AGENT_STEPS = [
-  '通读全文后，核心概念有三个：\n\n1. **梯度下降**：沿负梯度方向迭代更新参数\n2. **学习率**：决定每步长度，影响收敛速度与稳定性\n3. **局部最小值**：非凸函数中可能被困住的位置',
-  '三者关系：梯度下降依靠**梯度**指路，**学习率**定步长，最终可能收敛到**局部最小值**而非全局最优。',
-  '# 复习笔记：梯度下降\n\n## 一句话定义\n沿负梯度方向迭代更新参数，逐步逼近函数最小值的优化算法。\n\n## 要点\n- 更新公式：$\\theta := \\theta - \\alpha \\nabla J(\\theta)$\n- 学习率过大 → 震荡/发散；过小 → 收敛慢\n- 非凸函数可能陷入局部最小值\n\n## 类比\n蒙眼下山：每步朝最陡的下坡方向挪一小步。',
-];
-
 function sseHead(res) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
@@ -94,6 +88,16 @@ const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
   </div>
 </div>
 <script>
+// 脏数据注入：?badagent=1 往 localStorage 写一个结构损坏 + 硬中断残留的 agent
+// 会话，验证 loadSessions 的 normalizeAgent 兜底（旧版本数据 / Typora 崩溃残留）
+if (/[?&]badagent=1/.test(location.search)) {
+  try {
+    localStorage.setItem('tyai.sessions.v2', JSON.stringify([{
+      id: 'bad1', title: '损坏会话', ts: Date.now(), messages: [],
+      agent: { task: 123, steps: '这不是数组', status: 'running', calls: 'x', todo: '坏数据', summary: null, updated: '昨天' },
+    }]));
+  } catch (e) {}
+}
 // direct 模式：把前端切到直连，CFG 指向本 mock 的 OpenAI 兼容端点（不碰真实 Key）
 if (/[?&]direct=1/.test(location.search)) {
   window.__TYAI_MODE__ = 'direct';
@@ -248,11 +252,6 @@ function openAiAnswer(messages) {
     loopTurn++;
     return AGENT_LOOP_SCRIPT[i];
   }
-  if (/当前是第 (\d+)\/(\d+) 步/.test(user)) {   // 旧版逐步协议（/agent 兼容）
-    const m = user.match(/当前是第 (\d+)\/(\d+) 步/);
-    const idx = m ? parseInt(m[1], 10) - 1 : 0;
-    return AGENT_STEPS[idx] || AGENT_STEPS[0];
-  }
   if (/选中的内容/.test(user)) return ASK_ANSWER;
   return CHAT_ANSWER;
 }
@@ -289,20 +288,6 @@ const server = http.createServer((req, res) => {
       sseHead(res);
       sseText(res, openAiAnswer(body.messages || []));
     });
-    return;
-  }
-  if (req.method === 'POST' && pathname === '/agent') {
-    sseHead(res);
-    sseSend(res, { plan: { steps: ['通读文档，提取核心概念', '梳理概念之间的关系', '整理成结构化复习笔记'] } });
-    let i = 0;
-    (function next() {
-      if (i >= AGENT_STEPS.length) { sseSend(res, { done: true }); return res.end(); }
-      const idx = i++;
-      sseSend(res, { step_start: { i: idx, total: AGENT_STEPS.length, title: ['通读文档，提取核心概念', '梳理概念之间的关系', '整理成结构化复习笔记'][idx] } });
-      for (let k = 0; k < AGENT_STEPS[idx].length; k += 6) sseSend(res, { delta: AGENT_STEPS[idx].slice(k, k + 6), step: idx });
-      sseSend(res, { step_end: { i: idx } });
-      setTimeout(next, 30);
-    })();
     return;
   }
   // OpenAI 兼容端点（direct 模式）：/v1/chat/completions

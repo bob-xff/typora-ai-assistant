@@ -5,7 +5,7 @@
     生成可分发的安装包：
 
       dist\typora-ai-assistant\          ← 解压即可用的文件夹
-      dist\typora-ai-assistant-v2.8.0.zip ← 发给别人的压缩包
+      dist\typora-ai-assistant-v2.8.1.zip ← 发给别人的压缩包
 
     包含内容：installer\（安装/卸载）、plugin\（插件本体）、README、VERSION。
     不含：bridge\（可选的桥接服务，仅开发者使用）、任何真实 API Key。

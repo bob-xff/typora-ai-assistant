@@ -1,5 +1,5 @@
 /* ==========================================================================
-   xff助手一号 · 前端 v2.8
+   xff助手一号 · 前端 v2.8.1
    --------------------------------------------------------------------------
    兼容性（重要）：目标是 Typora 1.8.3 自带的 Electron 1.8.3 / Chromium 59（2017）。
    禁止使用该内核不认识的东西，否则界面会「错乱」：
@@ -21,7 +21,7 @@
   if (window.__TYPORA_AI_BRIDGE_V3__) return;
   window.__TYPORA_AI_BRIDGE_V3__ = true;
 
-  var VERSION = '2.8';
+  var VERSION = '2.8.1';
   var PORT = window.__AI_BRIDGE_PORT__ || 8765;
   var TOKEN = window.__AI_BRIDGE_TOKEN__ || '';
   var BASE = 'http://127.0.0.1:' + PORT;
@@ -793,17 +793,13 @@
       '4. 禁止编造文档里没有的事实；材料不足就直说缺什么。\n' +
       '5. 产出长文档（笔记/测验卷）时，主动用 save_md 落成文件，不要只留在对话里。';
 
-    // 从模型输出里解析工具调用块（取最后一个；容忍未闭合的流式半截块）
-    function parseToolCall(text) {
-      if (!text) return null;
-      var blocks = String(text).match(/```tool\s*([\s\S]*?)(?:```|$)/g);
-      if (!blocks || !blocks.length) return null;
-      var last = blocks[blocks.length - 1];
-      var start = last.indexOf('{');
+    // 解析单个工具调用块里的 JSON（容忍未闭合的流式半截块：depth 配对失败即放弃）
+    function parseOneToolBlock(block) {
+      var start = block.indexOf('{');
       if (start < 0) return null;
       var depth = 0, end = -1, inStr = false, escCh = false;
-      for (var i = start; i < last.length; i++) {
-        var c = last[i];
+      for (var i = start; i < block.length; i++) {
+        var c = block[i];
         if (inStr) {
           if (escCh) escCh = false;
           else if (c === '\\') escCh = true;
@@ -816,12 +812,25 @@
       }
       if (end < 0) return null;
       try {
-        var obj = JSON.parse(last.slice(start, end));
+        var obj = JSON.parse(block.slice(start, end));
         var tool = String(obj.tool || '');
         var ok = { read_document: 1, save_md: 1, clipboard: 1, memory_save: 1, memory_load: 1, todo_set: 1, plan_revise: 1, finish: 1 };
         if (!ok[tool]) return null;
         return { tool: tool, args: (obj.args && typeof obj.args === 'object') ? obj.args : {} };
       } catch (e) { return null; }
+    }
+
+    // 从模型输出里解析工具调用块：从后往前取第一个可解析的
+    // （模型偶尔违反"每轮一个"的约定输出多个块，或最后一个块畸形，不能因此丢掉前面的有效调用）
+    function parseToolCall(text) {
+      if (!text) return null;
+      var blocks = String(text).match(/```tool\s*([\s\S]*?)(?:```|$)/g);
+      if (!blocks || !blocks.length) return null;
+      for (var b = blocks.length - 1; b >= 0; b--) {
+        var call = parseOneToolBlock(blocks[b]);
+        if (call) return call;
+      }
+      return null;
     }
 
     // 去掉工具调用块，只留面向用户的正文：
@@ -1032,7 +1041,10 @@
 
   /* Agent 循环用的底层 LLM 调用：桥接走 /llm 透传（原样转发 messages），
      直连走 directRequest；桥接失败自动降级直连。 */
-  function llmStream(opts, handlers) {
+  // Agent 循环专用：桥接 /llm 透传，失败自动降级直连。
+  // onSwap：降级时把直连的 abort 回传调用方——否则调用方（callLLM 闭包）持有的
+  // 还是桥接的旧 abort，用户点停止只会调到一个空函数，直连请求继续跑。
+  function llmStream(opts, handlers, onSwap) {
     if (MODE === 'direct') return directRequest(opts, handlers);
 
     var retried = false;
@@ -1045,7 +1057,8 @@
         retried = true;
         MODE = 'direct';
         updateStatus();
-        state.abort = directRequest(opts, handlers);
+        var ab = directRequest(opts, handlers);
+        if (onSwap) onSwap(ab);
         return;
       }
       handlers.onError && handlers.onError(err);
@@ -1114,6 +1127,7 @@
       if (!s.id) s.id = uid();
       if (!s.title) s.title = '新对话';
       if (!s.ts) s.ts = Date.now();
+      normalizeAgent(s);   // agent 运行态兜底：结构损坏 / 硬中断残留都要能恢复
     }
     if (!state.sessions.length) state.sessions.push(newSession('新对话'));
     var saved = null;
@@ -1121,12 +1135,82 @@
     state.curId = state.sessions.some(function (s) { return s.id === saved; }) ? saved : state.sessions[0].id;
   }
 
+  /* Agent 运行态兜底：渲染层一律假设结构完整，脏数据在这里修干净。
+     两种典型脏数据：① 旧版本/手改过的残缺 agent；② Typora 崩溃或刷新时
+     持久化下来的 status='running'（重开后没人跑它，必须归一为 stopped，
+     否则界面卡在"运行中"又没有「继续」按钮，用户被困死）。 */
+  function normalizeAgent(s) {
+    var ag = s.agent;
+    if (ag == null) return;
+    if (!ag || typeof ag !== 'object' || Array.isArray(ag)) { s.agent = null; return; }
+    if (typeof ag.task !== 'string') ag.task = '';
+    if (!Array.isArray(ag.steps)) ag.steps = [];
+    ag.steps = ag.steps
+      .filter(function (x) { return x && typeof x === 'object' && !Array.isArray(x); })
+      .map(function (st) {
+        return {
+          title: String(st.title || st.goal || '未命名步骤').slice(0, 30),
+          goal: String(st.goal || '').slice(0, 200),
+          status: ['todo', 'doing', 'done', 'fail'].indexOf(st.status) >= 0 ? st.status : 'todo',
+          text: typeof st.text === 'string' ? st.text : '',
+          calls: Array.isArray(st.calls) ? st.calls.filter(function (c) { return c && typeof c === 'object'; }) : [],
+        };
+      });
+    if (['running', 'done', 'error', 'stopped'].indexOf(ag.status) < 0) ag.status = 'stopped';
+    if (ag.status === 'running') ag.status = 'stopped';   // 硬中断残留
+    if (typeof ag.calls !== 'number' || ag.calls < 0) ag.calls = 0;
+    if (typeof ag.summary !== 'string') ag.summary = '';
+    if (typeof ag.updated !== 'number') ag.updated = Date.now();
+    if (!Array.isArray(ag.todo)) ag.todo = null;
+    if (ag.todo) {
+      ag.todo = ag.todo
+        .filter(function (t) { return t && typeof t === 'object' && typeof t.text === 'string'; })
+        .map(function (t) {
+          return {
+            text: t.text.slice(0, 60),
+            status: ['todo', 'doing', 'done'].indexOf(t.status) >= 0 ? t.status : 'todo',
+          };
+        });
+      if (!ag.todo.length) ag.todo = null;
+    }
+  }
+
   function saveSessions() {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(state.sessions.slice(0, MAX_SESSIONS)));
       localStorage.setItem(STORE_KEY + '.cur', state.curId || '');
+      return;
     } catch (e) {}
+    // 超限兜底（QuotaExceeded）：Agent 长任务的正文 + 工具结果很容易顶到 5MB。
+    // 直接吞异常会让"进度持久化"静默失效——用户看到的是重启后记录凭空消失。
+    // 这里裁剪最占地方的正文与工具结果，保住任务结构（步骤/清单/状态/小结）。
+    try {
+      var slim = state.sessions.slice(0, MAX_SESSIONS).map(function (s) {
+        if (!s.agent || !Array.isArray(s.agent.steps)) return s;
+        var copy = {};
+        for (var k in s) copy[k] = s[k];
+        copy.agent = {
+          task: s.agent.task, status: s.agent.status, calls: s.agent.calls,
+          todo: s.agent.todo, summary: s.agent.summary, updated: s.agent.updated,
+          steps: s.agent.steps.map(function (st) {
+            return {
+              title: st.title, goal: st.goal, status: st.status,
+              text: String(st.text || '').slice(0, 400),
+              calls: (st.calls || []).slice(-3).map(function (c) {
+                return { tool: c.tool, ok: c.ok, result: String(c.result || '').slice(0, 200) };
+              }),
+            };
+          }),
+        };
+        return copy;
+      });
+      localStorage.setItem(STORE_KEY, JSON.stringify(slim));
+      localStorage.setItem(STORE_KEY + '.cur', state.curId || '');
+      quotaWarned = true;
+      setTimeout(function () { flash('本地存储空间不足，历史记录已压缩保存（长正文与工具细节被裁剪）'); }, 0);
+    } catch (e2) {}
   }
+  var quotaWarned = false;
 
   function newSession(title) {
     return { id: uid(), title: title || '新对话', ts: Date.now(), messages: [] };
@@ -2232,16 +2316,22 @@
       for (var j = 0; j < a.todo.length; j++) if (a.todo[j].status === 'done') tdone++;
       todoBits = ' · 清单 ' + tdone + '/' + a.todo.length;
     }
-    var resume = (a.status === 'stopped' || a.status === 'error')
+    var resume = (a.status === 'stopped' || a.status === 'error') && (a.calls || 0) < AGENT_MAX_CALLS
       ? ' <button type="button" class="tyai-inline-btn" data-agent-resume="1">继续</button>' : '';
+    var capNote = (a.status === 'stopped' || a.status === 'error') && (a.calls || 0) >= AGENT_MAX_CALLS
+      ? '（已达调用上限 ' + AGENT_MAX_CALLS + ' 次，无法继续）' : '';
     hint.innerHTML = '任务：' + esc(String(a.task).slice(0, 40)) + ' · ' + label +
-      '（' + done + '/' + a.steps.length + ' 步）' + todoBits + resume;
+      '（' + done + '/' + a.steps.length + ' 步）' + todoBits + resume + capNote;
   }
 
   function runAgent(task, resume) {
     var a = agentState();
     if (state.busy) { flash('正在生成中，先等当前任务完成或点停止'); return; }
     if (resume && a && a.task) {
+      if ((a.calls || 0) >= AGENT_MAX_CALLS) {
+        flash('本任务已达调用上限（' + AGENT_MAX_CALLS + ' 次），不能再继续；请新建任务');
+        return;
+      }
       task = a.task;
       for (var i = 0; i < a.steps.length; i++) {
         if (a.steps[i].status !== 'done') a.steps[i].status = 'todo';
@@ -2291,7 +2381,7 @@
         },
         onEnd: function () { if (!aborted.v) onDone(acc); },
         onError: function (err) { if (!aborted.v) onFail(err, acc); },
-      });
+      }, function (ab) { abortFn = ab; });   // 桥接→直连降级后，停止要能调到新 abort
     }
 
     function stepBody(idx) {
@@ -2396,9 +2486,10 @@
       if (name === 'memory_load') {
         var list = agentMemoryLoad();
         if (!list.length) return cb('（长期记忆为空）', true);
-        return cb(list.slice(-8).map(function (m, i) {
-          return (i + 1) + '. [' + (m.task || '') + '] ' + m.content;
-        }).join('\n'), true);
+        return cb('长期记忆最近 ' + Math.min(list.length, 8) + ' 条（最早在前）：\n' +
+          list.slice(-8).map(function (m, i) {
+            return (i + 1) + '. [' + (m.task || '') + '] ' + m.content;
+          }).join('\n'), true);
       }
       if (name === 'todo_set') {
         var items = Array.isArray(args.items) ? args.items : [];
@@ -2426,7 +2517,12 @@
         }
         if (!clean.length) return cb('计划修订失败：没有有效步骤', false);
         a.steps = a.steps.slice(0, currentIdx + 1).concat(clean);
-        renderAgent();
+        // 只追加新步骤卡：当前步可能正在流式输出，全量 renderAgent() 会重建 DOM、
+        // 丢掉 loading 态与 paintStream 节流里未 flush 的内容
+        for (var j = currentIdx + 1; j < a.steps.length; j++) {
+          els.timeline.insertAdjacentHTML('beforeend', agentStepHTML(j, a.steps[j]));
+        }
+        renderAgentHint();   // 步骤总数变了，状态行要同步
         return cb('剩余计划已调整为 ' + clean.length + ' 步', true);
       }
       return cb('未知工具：' + name, false);
@@ -2496,7 +2592,11 @@
           var call = DP.parseToolCall(acc);
           var prose = DP.stripToolBlocks(acc).trim();
           if (prose) st.text = (st.text ? st.text + '\n\n' : '') + prose;
-          if (!call) return completeStep(idx);
+          if (!call) {
+            // 既没工具也没正文：给个占位，别让用户看到一张空卡片还不知道发生了什么
+            var note = prose ? '' : '（本步模型没有返回内容，可直接重试或调整任务）';
+            return completeStep(idx, note);
+          }
           execTool(call, function (result, ok) {
             st.calls.push({ tool: call.tool, args: call.args, ok: ok, result: String(result).slice(0, 1500) });
             if (call.tool === 'finish') {

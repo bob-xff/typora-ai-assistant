@@ -28,7 +28,9 @@ function extract(name) {
   return src.slice(start, end);
 }
 
-const parseToolCall = new Function('return (' + extract('parseToolCall') + ')')();
+// parseToolCall 依赖 parseOneToolBlock（块内 JSON 解析），两个都要抽出来
+const parseOneToolBlock = new Function('return (' + extract('parseOneToolBlock') + ')')();
+const parseToolCall = new Function('parseOneToolBlock', 'return (' + extract('parseToolCall') + ')')(parseOneToolBlock);
 const stripToolBlocks = new Function('return (' + extract('stripToolBlocks') + ')')();
 
 let pass = 0, fail = 0;
@@ -49,6 +51,10 @@ r = parseToolCall('a\n```tool\n{"tool":"todo_set","args":{"items":[{"text":"x","
 t('数组参数', r && r.args.items.length, 1);
 r = parseToolCall('只有一个块\n```tool\n{"tool":"finish","args":{"summary":"ok"}}\n```\n中间又有\n```tool\n{"tool":"memory_save","args":{"content":"m"}}\n```');
 t('多块取最后一个', r && r.tool, 'memory_save');
+r = parseToolCall('前面有有效块\n```tool\n{"tool":"read_document","args":{}}\n```\n后面的块畸形\n```tool\n{"tool":"finish","args":{"sum');
+t('末块畸形 → 回退取前一个有效块', r && r.tool, 'read_document');
+r = parseToolCall('两个块都畸形\n```tool\n{"tool":"finish"\n```\n```tool\n{"tool":"save_md"');
+t('全部畸形 → null', r, null);
 r = parseToolCall('正文里提到 ```tool 但没有真正的块');
 t('无 JSON → null', r, null);
 r = parseToolCall('```tool\n{"tool":"eval","args":{}}\n```');
