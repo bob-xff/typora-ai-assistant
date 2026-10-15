@@ -1,5 +1,5 @@
 /* ==========================================================================
-   xff助手一号 · 前端 v2.8.2
+   xff助手一号 · 前端 v2.8.3
    --------------------------------------------------------------------------
    兼容性（重要）：目标是 Typora 1.8.3 自带的 Electron 1.8.3 / Chromium 59（2017）。
    禁止使用该内核不认识的东西，否则界面会「错乱」：
@@ -21,7 +21,7 @@
   if (window.__TYPORA_AI_BRIDGE_V3__) return;
   window.__TYPORA_AI_BRIDGE_V3__ = true;
 
-  var VERSION = '2.8.2';
+  var VERSION = '2.8.3';
   var PORT = window.__AI_BRIDGE_PORT__ || 8765;
   var TOKEN = window.__AI_BRIDGE_TOKEN__ || '';
   var BASE = 'http://127.0.0.1:' + PORT;
@@ -223,6 +223,7 @@
     lastRange: null,
     lastResult: '',
     lastScene: null,
+    lastQuestion: '',
   };
 
   var root, ball, panel, statusEl, bubble, composerInput;
@@ -311,6 +312,9 @@
 
   function latexToHtml(src) {
     var s = String(src || '');
+    // 占位符字符不进渲染层：模型输出里若含 \u0001/\u0003 + 数字，会和下面的
+    // slot 还原正则相撞，把正文替换成别的内容
+    s = s.replace(/[\u0001\u0003]/g, '');
     s = s.replace(/\\([%$&#_{}])/g, '$1');                       // 转义的普通字符
     s = s.replace(/\\[,;:!>]/g, ' ');                            // 间距命令
     var guard = 0;
@@ -328,10 +332,12 @@
     });
     var tags = [];
     function T(h) { tags.push(h); return '\u0003' + (tags.length - 1) + '\u0003'; }
-    s = s.replace(/\^\{([^{}]*)\}/g, function (m, x) { return T('<sup>' + x + '</sup>'); });
-    s = s.replace(/\^([0-9a-zA-Z+\-])/g, function (m, x) { return T('<sup>' + x + '</sup>'); });
-    s = s.replace(/_\{([^{}]*)\}/g, function (m, x) { return T('<sub>' + x + '</sub>'); });
-    s = s.replace(/_([0-9a-zA-Z])/g, function (m, x) { return T('<sub>' + x + '</sub>'); });
+    // 注意：上下标的内容同样来自模型输出，必须过 esc()——
+    // 否则 $\^{<img src=x onerror=alert(1)>}$ 会把原样 HTML 注入最终渲染结果
+    s = s.replace(/\^\{([^{}]*)\}/g, function (m, x) { return T('<sup>' + esc(x) + '</sup>'); });
+    s = s.replace(/\^([0-9a-zA-Z+\-])/g, function (m, x) { return T('<sup>' + esc(x) + '</sup>'); });
+    s = s.replace(/_\{([^{}]*)\}/g, function (m, x) { return T('<sub>' + esc(x) + '</sub>'); });
+    s = s.replace(/_([0-9a-zA-Z])/g, function (m, x) { return T('<sub>' + esc(x) + '</sub>'); });
     s = s.replace(/[{}]/g, '');
     s = s.replace(/\\/g, '');
     s = esc(s);
@@ -357,7 +363,8 @@
     var slots = [];
     function slot(html) { slots.push(html); return '\u0001' + (slots.length - 1) + '\u0001'; }
 
-    var text = String(src);
+    // 占位符字符不进渲染层：与上面的 slot 还原正则防碰撞（模型输出含 \u0001 时）
+    var text = String(src).replace(/[\u0001\u0003]/g, '');
     // 代码块：语言标签 + 复制按钮（代码先 esc 再进 data-code，读取时浏览器自动还原实体）
     text = text.replace(/```[^\n]*\n?([\s\S]*?)```/g, function (m, code) {
       var lang = (m.match(/```([^\n`]*)/) || [])[1].trim();
@@ -843,27 +850,33 @@
       return t;
     }
 
+    // 解析计划 JSON：模型有时会在 JSON 前带一句废话（里面也可能带花括号），
+    // 或忘记剥 ```json 围栏。依次尝试每个 '{' 起点，第一个能解析出 steps 的算数。
     function parsePlan(text) {
       if (!text) return null;
       var t = String(text).replace(/```(?:json)?/gi, '').trim();
-      var start = t.indexOf('{');
-      if (start < 0) return null;
-      var depth = 0, end = -1;
-      for (var i = start; i < t.length; i++) {
-        var c = t[i];
-        if (c === '{') depth++;
-        else if (c === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+      for (var p = 0; p < t.length; p++) {
+        if (t.charAt(p) !== '{') continue;
+        var depth = 0, end = -1;
+        for (var i = p; i < t.length; i++) {
+          var c = t.charAt(i);
+          if (c === '{') depth++;
+          else if (c === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+        }
+        if (end < 0) continue;   // 这段没有配对的 '}'，换下一个 '{' 起点
+        var clean = null;
+        try {
+          var obj = JSON.parse(t.slice(p, end));
+          var steps = Array.isArray(obj.steps) ? obj.steps : [];
+          clean = steps
+            .filter(function (s) { return s && (s.title || s.goal); })
+            .slice(0, 6)
+            .map(function (s) { return { title: String(s.title || s.goal).slice(0, 30), goal: String(s.goal || s.title).slice(0, 200) }; });
+        } catch (e) { clean = null; }
+        if (clean && clean.length) return clean;
+        p = end - 1;             // 这段没戏（不是计划），从它末尾之后继续找
       }
-      if (end < 0) return null;
-      try {
-        var obj = JSON.parse(t.slice(start, end));
-        var steps = Array.isArray(obj.steps) ? obj.steps : [];
-        var clean = steps
-          .filter(function (s) { return s && (s.title || s.goal); })
-          .slice(0, 6)
-          .map(function (s) { return { title: String(s.title || s.goal).slice(0, 30), goal: String(s.goal || s.title).slice(0, 200) }; });
-        return clean.length ? clean : null;
-      } catch (e) { return null; }
+      return null;
     }
 
     return {
@@ -1131,6 +1144,9 @@
       if (!s.ts) s.ts = Date.now();
       normalizeAgent(s);   // agent 运行态兜底：结构损坏 / 硬中断残留都要能恢复
     }
+    // 存储超量时按「最新在前」裁剪，与 saveSessions 的 slice(0, MAX) 口径一致；
+    // 不裁的话下次保存会把多出来的旧会话静默丢掉
+    if (state.sessions.length > MAX_SESSIONS) state.sessions = state.sessions.slice(0, MAX_SESSIONS);
     if (!state.sessions.length) state.sessions.push(newSession('新对话'));
     var saved = null;
     try { saved = localStorage.getItem(STORE_KEY + '.cur'); } catch (e) {}
@@ -1489,7 +1505,10 @@
     // 输入区
     $('tyai-send').addEventListener('click', onPrimaryAction);
     composerInput.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onPrimaryAction(); }
+      // 中文/日文输入法组字时，Enter 是「确认候选词」不是「发送」。
+      // isComposing 为主、keyCode 229 为老内核兜底，两者有一个成立就不发。
+      var composing = e.isComposing || e.keyCode === 229;
+      if (e.key === 'Enter' && !e.shiftKey && !composing) { e.preventDefault(); onPrimaryAction(); }
     });
     composerInput.addEventListener('input', autoGrow);
 
@@ -1578,6 +1597,7 @@
       if (state.tab === 'quick') {
         state.lastResult = '';
         state.lastScene = null;
+        state.lastQuestion = '';
         els.quickResult.innerHTML = '';
         updateActions();
       }
@@ -1903,7 +1923,16 @@
     if (!els.sideList) return;
     var q = (els.sideQ && els.sideQ.value || '').trim().toLowerCase();
     var list = state.sessions.filter(function (s) {
-      return !q || String(s.title || '').toLowerCase().indexOf(q) >= 0;
+      if (!q) return true;
+      if (String(s.title || '').toLowerCase().indexOf(q) >= 0) return true;
+      // 标题只是首问的前 18 字，容易搜不到；再拿用户消息内容兜底（每条截前 500 字）
+      var msgs = s.messages || [];
+      for (var i = 0; i < msgs.length; i++) {
+        var m = msgs[i];
+        if (m && m.role === 'user' &&
+            String(m.content || '').slice(0, 500).toLowerCase().indexOf(q) >= 0) return true;
+      }
+      return false;
     });
     if (!list.length) {
       els.sideList.innerHTML = '<div class="tyai-side-empty">' + (q ? '没有匹配的会话' : '还没有历史会话') + '</div>';
@@ -2049,7 +2078,7 @@
       return;
     }
     if (state.tab === 'quick') {
-      if (state.lastScene) runScene(state.lastScene);
+      if (state.lastScene) runScene(state.lastScene, null, state.lastQuestion);
       else flash('还没有可重答的内容');
       return;
     }
@@ -2226,7 +2255,8 @@
     try { return JSON.parse(localStorage.getItem(AGENT_MEM_KEY) || '[]') || []; } catch (e) { return []; }
   }
   function agentMemorySaveList(list) {
-    try { localStorage.setItem(AGENT_MEM_KEY, JSON.stringify(list.slice(0, 20))); } catch (e) {}
+    // 保留「最近」20 条：写 slice(0, 20) 会留下最旧的 20 条、把刚存的最新条目挤掉
+    try { localStorage.setItem(AGENT_MEM_KEY, JSON.stringify(list.slice(-20))); } catch (e) {}
   }
   function agentMemoryAdd(task, content) {
     if (!content) return;
@@ -2707,11 +2737,13 @@
       (sel ? '<div class="tyai-ctx-sel">' + esc(sel.slice(0, 200)) + (sel.length > 200 ? '…' : '') + '</div>' : '');
   }
 
-  function runScene(scene, forcedText) {
+  function runScene(scene, forcedText, question) {
     if (state.busy) { flash('正在生成中，先等当前回答完成或点停止'); return; }
     switchTab('quick');
     var sel = forcedText || state.lastSelection || getSelectionText() || '';
     state.lastSelection = sel;
+    // 记住本次追问的问题：之后点「重新生成」要原样重发，不能只剩一段选中内容
+    state.lastQuestion = (scene === 'ask') ? String(question || '') : '';
     var docText = getDocText();
     if (!sel && !docText) { showQuickError('没有可用的内容。请先选中一段文字，或打开一篇文档。'); return; }
     if (!sel && scene !== 'summarize' && scene !== 'outline') {
@@ -2728,7 +2760,7 @@
     state.abort = aiPost('/ask', {
       scene: scene,
       text: (scene === 'summarize' || scene === 'outline') ? docText : sel,
-      question: '',
+      question: String(question || ''),
       history: [],
       context: currentContext(),
     }, {
@@ -2785,6 +2817,7 @@
     composerInput.value = '';
     autoGrow();
     state.lastScene = 'ask';
+    state.lastQuestion = text;
     state.lastResult = '';
     renderContext();
     els.quickResult.innerHTML = '<div class="tyai-loading"><span></span><span></span><span></span></div>';
@@ -2816,8 +2849,10 @@
   }
 
   function stopGen() {
-    // Agent 的 abort 内部会自己给「可点继续」的提示并收尾，这里别再补一条
-    var wasAgent = state.tab === 'agent' && agentRunning();
+    // Agent 的 abort 内部会自己给「可点继续」的提示并收尾，这里别再补一条。
+    // 注意不能带 state.tab 条件：Agent 跑着的时候用户可以切到别的 tab 再点停止，
+    // 带了条件就会双重 flash。
+    var wasAgent = agentRunning();
     if (state.abort) { try { state.abort(); } catch (e) {} }
     state.abort = null;
     setBusy(false);

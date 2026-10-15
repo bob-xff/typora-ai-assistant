@@ -32,6 +32,7 @@ function extract(name) {
 const parseOneToolBlock = new Function('return (' + extract('parseOneToolBlock') + ')')();
 const parseToolCall = new Function('parseOneToolBlock', 'return (' + extract('parseToolCall') + ')')(parseOneToolBlock);
 const stripToolBlocks = new Function('return (' + extract('stripToolBlocks') + ')')();
+const parsePlan = new Function('return (' + extract('parsePlan') + ')')();
 
 let pass = 0, fail = 0;
 function t(name, actual, expect) {
@@ -72,6 +73,32 @@ t('去掉未闭合半截块（流式中）', stripToolBlocks('前文\n```tool\n{
 t('纯正文不动', stripToolBlocks('正常 **markdown** 文本'), '正常 **markdown** 文本');
 t('空串', stripToolBlocks(''), '');
 t('无正文只有块', stripToolBlocks('```tool\n{"tool":"finish"}\n```'), '');
+
+console.log('parsePlan');
+r = parsePlan('{"steps":[{"title":"梳理","goal":"读一遍"},{"title":"举例","goal":"找例子"}]}');
+t('标准 JSON', r && r.length, 2);
+t('字段裁剪', r && r[0], { title: '梳理', goal: '读一遍' });
+r = parsePlan('```json\n{"steps":[{"title":"a","goal":"b"}]}\n```');
+t('带 json 围栏', r && r.length, 1);
+r = parsePlan('好的，我来拆解 {顺便废话}。\n{"steps":[{"title":"a","goal":"b"}]}');
+t('前导废话含花括号 → 回退后一个起点', r && r.length, 1);
+r = parsePlan('{"foo":1}\n{"steps":[{"title":"a","goal":"b"}]}');
+t('前一个对象无 steps → 继续找', r && r.length, 1);
+r = parsePlan('{"steps":[]}');
+t('空 steps → null', r, null);
+r = parsePlan('{"steps":[{"title":"x"}]}');
+t('缺 goal 用 title 兜底', r && r[0], { title: 'x', goal: 'x' });
+var many = { steps: [] };
+for (var mi = 0; mi < 9; mi++) many.steps.push({ title: 's' + mi, goal: 'g' });
+r = parsePlan(JSON.stringify(many));
+t('超过 6 步截断', r && r.length, 6);
+t('标题超长截断', parsePlan('{"steps":[{"title":"' + '标'.repeat(40) + '","goal":"g"}]}')[0].title.length, 30);
+r = parsePlan('没有 JSON');
+t('无 JSON → null', r, null);
+r = parsePlan('{"steps": [');
+t('畸形 JSON → null', r, null);
+r = parsePlan('');
+t('空串 → null', r, null);
 
 console.log('结果：' + pass + ' 通过，' + fail + ' 失败');
 process.exit(fail ? 1 : 0);

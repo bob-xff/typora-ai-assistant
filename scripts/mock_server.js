@@ -314,7 +314,10 @@ function openAiAnswer(messages) {
     loopTurn++;
     return AGENT_LOOP_SCRIPT[i];
   }
-  if (/选中的内容/.test(user)) return ASK_ANSWER;
+  // 快捷场景（direct 模式走 DP.buildMessages，用户消息是场景提示词）：
+  // 只匹配「选中的内容」会漏掉 explain/translate/plain/summarize/outline/quiz，
+  // 那些场景会错拿 CHAT_ANSWER。把各场景的特征句都列上。
+  if (/选中的内容|请解释下面这段内容|把下面的内容翻译一下|大白话重讲|请总结下面这篇文档|层级大纲|出 3 道题/.test(user)) return ASK_ANSWER;
   return CHAT_ANSWER;
 }
 

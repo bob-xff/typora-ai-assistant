@@ -174,31 +174,36 @@ function agentStepPrompt({ task, step, index, total, prevResults, selection, doc
   ].filter(Boolean).join('\n\n');
 }
 
-// 从模型输出里稳健地抠出计划 JSON；失败返回 null
+// 从模型输出里稳健地抠出计划 JSON；失败返回 null。
+// 模型有时会在 JSON 前带一句废话（里面也可能带花括号），依次尝试每个 '{' 起点。
 function parsePlan(text) {
   if (!text) return null;
-  let t = String(text).replace(/```(?:json)?/gi, '').trim();
-  const start = t.indexOf('{');
-  if (start < 0) return null;
-  let depth = 0;
-  let end = -1;
-  for (let i = start; i < t.length; i++) {
-    const c = t[i];
-    if (c === '{') depth++;
-    else if (c === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+  const t = String(text).replace(/```(?:json)?/gi, '').trim();
+  for (let p = 0; p < t.length; p++) {
+    if (t[p] !== '{') continue;
+    let depth = 0;
+    let end = -1;
+    for (let i = p; i < t.length; i++) {
+      const c = t[i];
+      if (c === '{') depth++;
+      else if (c === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+    }
+    if (end < 0) continue;
+    let clean = null;
+    try {
+      const obj = JSON.parse(t.slice(p, end));
+      const steps = Array.isArray(obj.steps) ? obj.steps : [];
+      clean = steps
+        .filter((s) => s && (s.title || s.goal))
+        .slice(0, 5)
+        .map((s) => ({ title: String(s.title || s.goal).slice(0, 30), goal: String(s.goal || s.title).slice(0, 200) }));
+    } catch (e) {
+      clean = null;
+    }
+    if (clean && clean.length) return clean;
+    p = end - 1;
   }
-  if (end < 0) return null;
-  try {
-    const obj = JSON.parse(t.slice(start, end));
-    const steps = Array.isArray(obj.steps) ? obj.steps : [];
-    const clean = steps
-      .filter((s) => s && (s.title || s.goal))
-      .slice(0, 5)
-      .map((s) => ({ title: String(s.title || s.goal).slice(0, 30), goal: String(s.goal || s.title).slice(0, 200) }));
-    return clean.length ? clean : null;
-  } catch (e) {
-    return null;
-  }
+  return null;
 }
 
 module.exports = {

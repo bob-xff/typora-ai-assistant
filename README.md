@@ -71,7 +71,7 @@ OpenAI 兼容服务的预设，在输入框左下角的下拉里直接切；API 
 
 ### 方式一：用安装包（推荐）
 
-1. 下载 Releases 里的 `typora-ai-assistant-v2.8.2.zip`，**解压**（不要直接在压缩包里运行）
+1. 下载 Releases 里的 `typora-ai-assistant-v2.8.3.zip`，**解压**（不要直接在压缩包里运行）
 2. 双击 `installer\install.bat`
 3. UAC 弹窗点「是」（要写 Typora 安装目录，必须管理员权限）
 4. 重启 Typora
