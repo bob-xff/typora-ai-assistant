@@ -71,7 +71,7 @@ OpenAI 兼容服务的预设，在输入框左下角的下拉里直接切；API 
 
 ### 方式一：用安装包（推荐）
 
-1. 下载 Releases 里的 `typora-ai-assistant-v2.8.1.zip`，**解压**（不要直接在压缩包里运行）
+1. 下载 Releases 里的 `typora-ai-assistant-v2.8.2.zip`，**解压**（不要直接在压缩包里运行）
 2. 双击 `installer\install.bat`
 3. UAC 弹窗点「是」（要写 Typora 安装目录，必须管理员权限）
 4. 重启 Typora
@@ -316,7 +316,13 @@ node scripts/mock_server.js
 #   加 ?task=任务               跑一遍 Agent 自主循环（罐头脚本：读文档→清单→保存→收束）
 #   加 ?steps=new;q:你好        脚本化验证侧栏：新建/搜索/切换/删除
 #   加 ?badagent=1              注入结构损坏 + 硬中断残留的会话数据，验证恢复兜底
+#   加 ?mousedown=body          往指定元素派发真实 mousedown，验证「点面板外自动收回」
 #   steps 指令：new 新建 / switch:N 切到第 N 条 / q:关键词 搜索 / del:N 删除 / click:选择器
+#
+# ⚠️ 改 mock_server.js 的 PAGE 模板时：正则字面量里的 \/ 会被模板字符串转义成 /，
+# 整个正则退化成 // 注释、吞掉后续代码，页面 script 块直接语法错误（症状：direct /
+# slow / badagent 钩子全部"失效"，而桥接罐头照常返回，极易误判成产品 bug）。
+# 模板里要写正则就用 new RegExp('字符串')，别用 /...\/ 字面量。
 
 # Agent 工具协议单测（工具白名单 / JSON 解析 / 流式半截块 / 多块回退）
 node scripts/test-agent-protocol.js

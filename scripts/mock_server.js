@@ -96,11 +96,36 @@ if (/[?&]badagent=1/.test(location.search)) {
       id: 'bad1', title: '损坏会话', ts: Date.now(), messages: [],
       agent: { task: 123, steps: '这不是数组', status: 'running', calls: 'x', todo: '坏数据', summary: null, updated: '昨天' },
     }]));
+    var _mk = document.createElement('div');
+    _mk.id = 'inject-mark';
+    _mk.textContent = 'badagent-injected';
+    document.body.appendChild(_mk);
   } catch (e) {}
 }
 // direct 模式：把前端切到直连，CFG 指向本 mock 的 OpenAI 兼容端点（不碰真实 Key）
+// 注意：PAGE 是模板字符串，正则字面量里的 \/ 会被转义成 /（退化成注释！），
+// 这里一律用 new RegExp 的字符串形式，别再踩坑。
+if (/[?&]slow=1/.test(location.search)) {
+  // 慢速 LLM：把每个请求推迟 700ms，拉长 Agent 循环，
+  // 便于验证「运行中切换/新建/删除会话被拦截」这类时序敏感场景
+  var _slowRe = new RegExp('/(llm|chat|ask|chat/completions)');
+  var _fetch = window.fetch ? window.fetch.bind(window) : null;
+  if (_fetch) {
+    window.fetch = function (input, init) {
+      var url = typeof input === 'string' ? input : ((input && input.url) || '');
+      if (_slowRe.test(url)) {
+        return new Promise(function (res) { setTimeout(function () { res(_fetch(input, init)); }, 700); });
+      }
+      return _fetch(input, init);
+    };
+  }
+}
 if (/[?&]direct=1/.test(location.search)) {
   window.__TYAI_MODE__ = 'direct';
+  var _dm = document.createElement('div');
+  _dm.id = 'direct-mark';
+  _dm.textContent = 'direct-mode';
+  document.body.appendChild(_dm);
   // 测试台专用 reqnode shim：用 fetch 流式模拟 Node http（仅本页生效，不进产品代码）
   window.reqnode = function (mod) {
     return {
@@ -175,6 +200,17 @@ if (/[?&]direct=1/.test(location.search)) {
 (function () {
   var q = {};
   location.search.replace(/([^?&=]+)=([^&]*)/g, function (_, k, v) { q[k] = decodeURIComponent(v); return ''; });
+  // 测试台专用：当前会话的 Agent 是否处于运行态（读持久化数据，供 steps 日志标注）
+  function agentOn() {
+    try {
+      var list = JSON.parse(localStorage.getItem('tyai.sessions.v2') || '[]');
+      var cur = localStorage.getItem('tyai.sessions.v2.cur');
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === cur && list[i].agent && list[i].agent.status === 'running') return true;
+      }
+    } catch (e) {}
+    return false;
+  }
   window.addEventListener('load', function () {
     setTimeout(function () {
       var write = document.getElementById('write');
@@ -201,8 +237,7 @@ if (/[?&]direct=1/.test(location.search)) {
           if (_b) _b.click(); else console.warn('bubble: 浮窗里找不到', q.bubble);
         }
         // 脚本化动作序列：?steps=new;chat:你好;new;chat:第二问;switch:1;q:第二;del:0
-        if (q.steps) {
-          var acts = q.steps.split(';');
+        if (q.steps) {          var acts = q.steps.split(';');
           var i = 0;
           (function next() {
             if (i >= acts.length) return;
@@ -232,8 +267,35 @@ if (/[?&]direct=1/.test(location.search)) {
                 if (el) el.click(); else console.warn('click: 找不到', m[1]);
               }
             } catch (e) { console.warn('step 失败:', a, e); }
+            window.__stepsLog = (window.__stepsLog || []).concat(a + (agentOn() ? '' : '(未运行)'));
             setTimeout(next, 700);
           })();
+        }
+        // 外部点击收回验证：?mousedown=body / ?mousedown=#tyai-ball / ?mousedown=#tyai-panel
+        // 往指定元素派发真实 mousedown（冒泡到 document），验证 outside-click 逻辑。
+        // 面板在 api.open() 时已展开；1.6s 后派发，dump-dom/截图核对 #tyai-panel 的 on 类。
+        if (q.mousedown) {
+          setTimeout(function () {
+            var el = q.mousedown === 'body' ? document.body : document.querySelector(q.mousedown);
+            if (!el) { console.warn('mousedown: 找不到', q.mousedown); return; }
+            var ev = document.createEvent('MouseEvents');
+            ev.initMouseEvent('mousedown', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
+            el.dispatchEvent(ev);
+            var p = document.getElementById('tyai-panel');
+            console.log('[TEST] mousedown ->', q.mousedown,
+              '| panel.on =', p.classList.contains('on'),
+              '| sheet.hidden =', document.getElementById('tyai-sheet').hidden);
+          }, 1600);
+        }
+        // steps 执行日志落到一个隐藏 DOM 节点，供 --dump-dom 断言（无头环境拿不到 console）
+        if (q.steps) {
+          setTimeout(function () {
+            var log = document.createElement('div');
+            log.id = 'test-steps-log';
+            log.style.display = 'none';
+            log.textContent = (window.__stepsLog || []).join(' | ');
+            document.body.appendChild(log);
+          }, 1400 + 800 * String(q.steps).split(';').length);
         }
       }, 300);
     }, 500);

@@ -1,5 +1,5 @@
 /* ==========================================================================
-   xff助手一号 · 前端 v2.8.1
+   xff助手一号 · 前端 v2.8.2
    --------------------------------------------------------------------------
    兼容性（重要）：目标是 Typora 1.8.3 自带的 Electron 1.8.3 / Chromium 59（2017）。
    禁止使用该内核不认识的东西，否则界面会「错乱」：
@@ -21,7 +21,7 @@
   if (window.__TYPORA_AI_BRIDGE_V3__) return;
   window.__TYPORA_AI_BRIDGE_V3__ = true;
 
-  var VERSION = '2.8.1';
+  var VERSION = '2.8.2';
   var PORT = window.__AI_BRIDGE_PORT__ || 8765;
   var TOKEN = window.__AI_BRIDGE_TOKEN__ || '';
   var BASE = 'http://127.0.0.1:' + PORT;
@@ -1031,6 +1031,7 @@
         retried = true;
         MODE = 'direct';
         updateStatus();
+        syncModelUI();          // 模式变了，模型徽章的 Key 警告态要跟着刷新
         state.abort = directHandle(path, body, handlers);
         return;
       }
@@ -1057,6 +1058,7 @@
         retried = true;
         MODE = 'direct';
         updateStatus();
+        syncModelUI();          // 模式变了，模型徽章的 Key 警告态要跟着刷新
         var ab = directRequest(opts, handlers);
         if (onSwap) onSwap(ab);
         return;
@@ -1532,16 +1534,15 @@
       runAgent(text);
     });
 
-    // 时间线：工具卡展开/收起；中断后「继续」
+    // 时间线：工具卡展开/收起（toolcall 卡在时间线内，委托挂这里）
     els.timeline.addEventListener('click', function (e) {
-      var rs = e.target.closest('[data-agent-resume]');
-      if (rs) { runAgent('', true); return; }
       var tc = e.target.closest('[data-tool-toggle]');
       if (tc) tc.classList.toggle('open');
     });
 
     // ---------- 历史会话栏 ----------
     $('tyai-side-new').addEventListener('click', function () {
+      if (agentRunning()) { flash('智能体任务正在运行，先停止或等它完成再新建会话'); return; }
       var s = newSession('新对话');
       state.sessions.unshift(s);
       state.curId = s.id;
@@ -1568,10 +1569,18 @@
       if (!item) return;
       var id = item.getAttribute('data-id');
       if (id === state.curId) return;
+      if (agentRunning()) { flash('智能体任务正在运行，先停止或等它完成再切换会话'); return; }
       state.curId = id;
       saveSessions();
       renderSideList();
       renderChat();
+      // 快捷结果不随会话持久化：切走后必须清掉，否则会看到上一个会话的残留
+      if (state.tab === 'quick') {
+        state.lastResult = '';
+        state.lastScene = null;
+        els.quickResult.innerHTML = '';
+        updateActions();
+      }
     });
 
     // 消息流内嵌按钮：单条复制 + 代码块复制（独立类名 + 容器委托，避免被通用处理器误接）
@@ -1595,8 +1604,13 @@
       if (btn) runScene(btn.getAttribute('data-scene'));
     });
 
-    // 点空白关闭弹层
+    // 点空白关闭弹层 / 收回面板
     document.addEventListener('mousedown', function (e) {
+      // 点面板外（Typora 正文、菜单、文件树等任意位置）自动收回面板；
+      // 悬浮球除外——它的 click 负责 toggle，这里关掉会被 click 再打开，表现为「点球关不掉」
+      if (state.open && !panel.contains(e.target) && !ball.contains(e.target)) {
+        togglePanel(false);
+      }
       if (!els.popModel.hidden && !els.popModel.contains(e.target) && !$('tyai-model-pill').contains(e.target)) els.popModel.hidden = true;
       if (bubble.classList.contains('on') && !bubble.contains(e.target)) hideBubble();
     });
@@ -1908,6 +1922,11 @@
     var idx = -1;
     for (var i = 0; i < state.sessions.length; i++) if (state.sessions[i].id === id) { idx = i; break; }
     if (idx < 0) return;
+    var target = state.sessions[idx];
+    if (target && target.agent && target.agent.status === 'running') {
+      flash('这个会话的智能体还在运行，先停止再删除');
+      return;
+    }
     var wasCur = state.sessions[idx].id === state.curId;
     state.sessions.splice(idx, 1);
     if (!state.sessions.length) state.sessions.push(newSession('新对话'));
@@ -2225,13 +2244,23 @@
     return '\n\n【长期记忆（早前任务存下的要点，可用 memory_save 增补）】\n' + recent;
   }
 
+  // Agent 运行期间锁定的目标会话：持久化只认它。
+  // 否则运行中切到别的会话，agentPersist()（内部走 curSession()）会把进度
+  // 写进新会话，原会话的状态则停在旧点——两边都对不上。
+  var agentSess = null;
+
   function agentState() {
     var s = curSession();
     return s.agent || null;
   }
 
+  // 是否有 Agent 正在跑（切换/删除会话前要拦，否则时间线 DOM 与记录都会串）
+  function agentRunning() {
+    return !!(agentSess && agentSess.agent && agentSess.agent.status === 'running');
+  }
+
   function agentPersist() {
-    var a = agentState();
+    var a = agentSess ? agentSess.agent : agentState();
     if (a) a.updated = Date.now();
     saveSessions();
   }
@@ -2332,6 +2361,7 @@
         flash('本任务已达调用上限（' + AGENT_MAX_CALLS + ' 次），不能再继续；请新建任务');
         return;
       }
+      agentSess = curSession();
       task = a.task;
       for (var i = 0; i < a.steps.length; i++) {
         if (a.steps[i].status !== 'done') a.steps[i].status = 'todo';
@@ -2340,7 +2370,8 @@
       a.calls = a.calls || 0;
     } else {
       if (!task) { flash('先描述一下学习任务'); return; }
-      a = curSession().agent = { task: task, steps: [], status: 'running', calls: 0, todo: null, summary: '' };
+      agentSess = curSession();
+      a = agentSess.agent = { task: task, steps: [], status: 'running', calls: 0, todo: null, summary: '' };
     }
     els.timeline.innerHTML = '';
     setBusy(true);
@@ -2354,13 +2385,14 @@
     state.abort = function () {
       aborted.v = true;
       try { abortFn && abortFn(); } catch (e) {}
-      var cur = agentState();
+      var cur = agentSess && agentSess.agent;
       if (cur && cur.status === 'running') {
         if (currentIdx >= 0 && cur.steps[currentIdx]) cur.steps[currentIdx].status = 'todo';
         cur.status = 'stopped';
         agentPersist();
         renderAgentHint();
       }
+      agentSess = null;
       setBusy(false);
       updateActions();
       flash('已停止，可点「继续」接着跑');
@@ -2395,6 +2427,7 @@
         agentMemoryAdd(a.task, '任务「' + a.task + '」完成。' + (a.summary ? '小结：' + a.summary : ''));
       }
       agentPersist();
+      agentSess = null;
       renderAgent();          // 与（可能被 finish 截断过的）步骤列表同步
       renderAgentHint();
       setBusy(false);
@@ -2419,6 +2452,7 @@
       }
       a.status = 'error';
       agentPersist();
+      agentSess = null;
       renderAgentHint();
       setBusy(false);
       updateActions();
@@ -2782,10 +2816,12 @@
   }
 
   function stopGen() {
+    // Agent 的 abort 内部会自己给「可点继续」的提示并收尾，这里别再补一条
+    var wasAgent = state.tab === 'agent' && agentRunning();
     if (state.abort) { try { state.abort(); } catch (e) {} }
     state.abort = null;
     setBusy(false);
-    flash('已停止');
+    if (!wasAgent) flash('已停止');
   }
 
   /* ---------------------------- 输出落地 ---------------------------- */
@@ -2897,8 +2933,12 @@
         (KERNEL.modern ? '完整形态' : '兼容形态') + ' · ' + (MODE === 'direct' ? '直连' : '桥接') + '模式');
     } catch (e) {}
 
-    // 错误提示里的「去配置」按钮（事件委托）
+    // 错误提示/「继续」按钮（事件委托）。
+    // 注意：resume 按钮在 #tyai-agent-hint 里，是 .tyai-timeline 的兄弟节点，
+    // 挂在 timeline 上永远收不到——必须挂在 root 层。
     root.addEventListener('click', function (e) {
+      var rs = e.target.closest('[data-agent-resume]');
+      if (rs) { runAgent('', true); return; }
       var b = e.target.closest('.tyai-inline-btn[data-open-cfg]');
       if (b) openSheet();
     });
