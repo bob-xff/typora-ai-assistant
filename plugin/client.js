@@ -1,5 +1,5 @@
 /* ==========================================================================
-   xff助手一号 · 前端 v2.8.3
+   xff助手一号 · 前端 v2.9.0
    --------------------------------------------------------------------------
    兼容性（重要）：目标是 Typora 1.8.3 自带的 Electron 1.8.3 / Chromium 59（2017）。
    禁止使用该内核不认识的东西，否则界面会「错乱」：
@@ -13,6 +13,15 @@
          - direct 模式：Typora 渲染进程直连 AI API（默认，无需后台）
          - bridge 模式：请求走本地桥接服务（可选，支持热更新）
    同一份代码也能直接在浏览器里跑（桥接服务的首页就是测试台）。
+
+   v2.9.0 交互框架（对齐主流 ChatAI / Agent 的做法，见 docs/INTERACTION.md）：
+     · 会话绑定文档：切换 md 文件时自动切到该文件自己的对话，不再拿上一篇
+       的上下文去答新文件的问题；
+     · 流式期间可读：滚上去就不再把视口拽回底部，出现「回到底部」；
+       随时可停，已生成内容一律保留并标「已停止」，可「继续」；
+     · 消息级操作：复制 / 重新生成 / 编辑重发 / 继续；
+     · 侧栏快捷关闭：× / Esc / Ctrl+Alt+B，会话可重命名、显示所属文件；
+     · 上下文透明：输入区上方常驻 chips（当前文档 / 选中片段），可手动移除。
    ========================================================================== */
 
 (function () {
@@ -21,7 +30,7 @@
   if (window.__TYPORA_AI_BRIDGE_V3__) return;
   window.__TYPORA_AI_BRIDGE_V3__ = true;
 
-  var VERSION = '2.8.3';
+  var VERSION = '2.9.0';
   var PORT = window.__AI_BRIDGE_PORT__ || 8765;
   var TOKEN = window.__AI_BRIDGE_TOKEN__ || '';
   var BASE = 'http://127.0.0.1:' + PORT;
@@ -62,6 +71,9 @@
     sidebar: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M9.5 4.5v15"/>',
     save: '<path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 15.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/>',
     file: '<path d="M6.5 3.5h7l4 4v13a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2z"/><path d="M13.5 3.5v4h4"/>',
+    down: '<path d="M12 4.5v14"/><path d="M6 12.5 12 18.5 18 12.5"/>',
+    edit: '<path d="M4 20h4.2L20 8.2 15.8 4 4 15.8z"/><path d="M13.8 6 18 10.2"/>',
+    fold: '<path d="M6 4.5v15"/><path d="M20 12H9"/><path d="M13 8l-4 4 4 4"/>',
   };
 
   function icon(name, size) {
@@ -110,7 +122,9 @@
     model: 'deepseek-chat',
     apiKey: '',
     temperature: 0.7,
-    maxContextChars: 12000
+    maxContextChars: 12000,
+    closeOnOutside: false,   // 点面板外是否自动收起（默认关：读文档时面板要留得住）
+    autoDocSession: true,    // 切换 md 文件时自动切到该文件自己的对话
   };
 
   // 只合并「有值」的字段，避免空值把已有配置抹掉
@@ -211,6 +225,7 @@
   var MAX_SESSIONS = 30;
   var MAX_TURNS = 60;
   var DATA_TIMEOUT = 60000;
+  var SEL_TTL = 10 * 60 * 1000;    // 选区上下文最多沿用 10 分钟（防止拿很久以前的选区去答新问题）
 
   var state = {
     tab: 'chat',
@@ -220,15 +235,23 @@
     sessions: [],
     curId: null,
     lastSelection: '',
+    lastSelectionTs: 0,
     lastRange: null,
     lastResult: '',
     lastScene: null,
     lastQuestion: '',
+    docPath: '',        // 编辑器当前打开的 md 文件（会话按它归组）
+    pendingDoc: '',     // 生成中检测到的文档切换，空闲后再落地
+    drafts: {},         // 每个会话各自的输入草稿（切会话不丢）
+    stream: null,       // 正在进行的流式回答（停止时用它收尾）
+    editFrom: null,     // 「编辑重发」：下一条消息将从这一条起覆盖
   };
 
   var root, ball, panel, statusEl, bubble, composerInput;
   var els = {};
   var sheetProvider = '';   // 设置抽屉里当前选中的服务商
+  var jumpEl = null;        // 「回到底部」悬浮按钮
+  var docTimer = null;      // 文档切换轮询
 
   /* ======================================================================
    * 工具
@@ -393,10 +416,48 @@
 
     var lines = text.split('\n');
     var out = [];
-    var list = null;
 
-    function closeList() { if (list) { out.push('</' + list + '>'); list = null; } }
-    function openList(type) { if (list !== type) { closeList(); out.push('<' + type + '>'); list = type; } }
+    function closeList() { /* 列表现在整段解析，这里保留空实现以便局部替换 */ }
+
+    // 列表：把连续的列表行整段收下来，按缩进建树 —— 支持多级嵌套 + 任务清单。
+    // 内容在 inline() 之前已经过 esc()，这里只拼结构，不再引入未转义文本。
+    function listHTML(items) {
+      var html = '';
+      var stack = [];      // [{type, depth}]
+      var liOpen = false;
+      function closeLi() { if (liOpen) { html += '</li>'; liOpen = false; } }
+      for (var k = 0; k < items.length; k++) {
+        var it = items[k];
+        if (!stack.length) {
+          html += '<' + it.type + '>';
+          stack.push({ type: it.type, depth: it.depth });
+        } else if (it.depth > stack[stack.length - 1].depth) {
+          html += '<' + it.type + '>';
+          stack.push({ type: it.type, depth: it.depth });
+        } else {
+          closeLi();
+          while (stack.length > 1 && it.depth < stack[stack.length - 1].depth) {
+            html += '</' + stack.pop().type + '></li>';
+          }
+          if (it.type !== stack[stack.length - 1].type) {
+            html += '</' + stack.pop().type + '><' + it.type + '>';
+            stack.push({ type: it.type, depth: it.depth });
+          }
+        }
+        var body = it.text;
+        var tm = body.match(/^\[([ xX])\]\s+([\s\S]*)$/);
+        var mark = '';
+        if (tm) { mark = '<span class="tyai-task' + (tm[1] === ' ' ? '' : ' done') + '"></span>'; body = tm[2]; }
+        html += '<li>' + mark + inline(body);
+        liOpen = true;
+      }
+      closeLi();
+      while (stack.length) {
+        html += '</' + stack.pop().type + '>';
+        if (stack.length) html += '</li>';
+      }
+      return html;
+    }
 
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
@@ -412,8 +473,46 @@
         continue;
       }
       if (/^\s*([-*_])\s*\1\s*\1[\s\S]*$/.test(line)) { closeList(); out.push('<hr>'); continue; }
-      if ((m = line.match(/^\s*[-*+]\s+(.*)$/))) { openList('ul'); out.push('<li>' + inline(m[1]) + '</li>'); continue; }
-      if ((m = line.match(/^\s*\d+[.)]\s+(.*)$/))) { openList('ol'); out.push('<li>' + inline(m[1]) + '</li>'); continue; }
+
+      // 列表项（含嵌套）：把整段连续列表一次吃掉
+      if ((m = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/))) {
+        closeList();
+        var widths = [m[1].replace(/\t/g, '  ').length];
+        var depthOf = function (w) {
+          if (w > widths[widths.length - 1]) { widths.push(w); return Math.min(3, widths.length - 1); }
+          while (widths.length > 1 && w < widths[widths.length - 1]) widths.pop();
+          if (w > widths[widths.length - 1]) { widths.push(w); }
+          return Math.min(3, widths.length - 1);
+        };
+        var items = [{
+          depth: 0,
+          type: /\d/.test(m[2]) ? 'ol' : 'ul',
+          text: m[3],
+        }];
+        while (i + 1 < lines.length) {
+          var nx = lines[i + 1];
+          var nm = nx.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+          if (nm) {
+            items.push({
+              depth: depthOf(nm[1].replace(/\t/g, '  ').length),
+              type: /\d/.test(nm[2]) ? 'ol' : 'ul',
+              text: nm[3],
+            });
+            i++;
+            continue;
+          }
+          // 列表项的续行（缩进的普通文本）并进上一条
+          if (nx.trim() && /^\s{2,}/.test(nx) && !/^\s*([-*_])\s*\1\s*\1/.test(nx)) {
+            items[items.length - 1].text += ' ' + nx.trim();
+            i++;
+            continue;
+          }
+          break;
+        }
+        out.push(listHTML(items));
+        continue;
+      }
+
       if ((m = line.match(/^&gt;\s?(.*)$/))) { closeList(); out.push('<blockquote>' + inline(m[1]) + '</blockquote>'); continue; }
 
       if (line.indexOf('|') === 0 && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1])) {
@@ -455,7 +554,7 @@
       if (streamPaint.timer) { clearTimeout(streamPaint.timer); streamPaint.timer = null; }
       streamPaint.el = el; streamPaint.html = html; streamPaint.last = now;
       el.innerHTML = html;
-      if (scrollEl) scrollBottom(scrollEl);
+      if (scrollEl) stickScroll(scrollEl);
       return;
     }
     streamPaint.html = html;
@@ -463,14 +562,14 @@
       if (streamPaint.timer) { clearTimeout(streamPaint.timer); streamPaint.timer = null; }
       streamPaint.last = now;
       el.innerHTML = html;
-      if (scrollEl) scrollBottom(scrollEl);
+      if (scrollEl) stickScroll(scrollEl);
     } else if (!streamPaint.timer) {
       streamPaint.timer = setTimeout(function () {
         streamPaint.timer = null;
         streamPaint.last = Date.now();
         if (streamPaint.el) {
           streamPaint.el.innerHTML = streamPaint.html;
-          if (scrollEl) scrollBottom(scrollEl);
+          if (scrollEl) stickScroll(scrollEl);
         }
       }, 60 - (now - streamPaint.last));
     }
@@ -480,6 +579,68 @@
     if (streamPaint.timer) { clearTimeout(streamPaint.timer); streamPaint.timer = null; }
     streamPaint.el = el; streamPaint.html = html; streamPaint.last = Date.now();
     if (el) el.innerHTML = html;
+  }
+
+  /* ------------------------------------------------------------------
+   * 滚动锚定（主流 AI 客户端的核心手感）：
+   *   · 用户停在底部 → 新内容来了自动跟随；
+   *   · 用户往上翻着读 → 绝对不要把他拽回底部，只在右下角亮「回到底部」。
+   * 之前每个 delta 都无条件 scrollTop = scrollHeight，导致长回答根本没法边生成边读。
+   * ---------------------------------------------------------------- */
+  var SCROLL_PAD = 56;
+
+  function nearBottom(el) {
+    if (!el) return true;
+    return (el.scrollHeight - el.scrollTop - el.clientHeight) < SCROLL_PAD;
+  }
+
+  function attachScrollAnchor(el) {
+    if (!el || el.__tyaiAnchor) return;
+    el.__tyaiAnchor = 1;
+    el.addEventListener('scroll', function () {
+      var nb = nearBottom(el);
+      el.__tyaiStick = nb;
+      if (!nb && (state.busy || (state.stream && state.stream.active))) showJump(el);
+      else if (nb) hideJump();
+    });
+  }
+
+  // 强制回到底部（切换会话、发出新消息这类「应该跟到底」的时机用）
+  function scrollBottom(el) {
+    if (!el) return;
+    el.__tyaiStick = true;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  // 流式增量刷新时用：用户读旧内容就别动他的视口
+  function stickScroll(el) {
+    if (!el) return;
+    attachScrollAnchor(el);
+    if (el.__tyaiStick === false) { showJump(el); return; }
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function activeScroller() {
+    if (state.tab === 'agent') return els.timeline;
+    if (state.tab === 'quick') return els.quickWrap || els.quickResult;
+    return els.msgs;
+  }
+
+  function showJump(el) {
+    if (!jumpEl) return;
+    jumpEl.__target = el || activeScroller();
+    jumpEl.classList.add('on');
+  }
+
+  function hideJump() {
+    if (!jumpEl) return;
+    jumpEl.classList.remove('on');
+    jumpEl.classList.remove('new');
+  }
+
+  function markJumpNew() {
+    if (!jumpEl || !jumpEl.classList.contains('on')) return;
+    jumpEl.classList.add('new');
   }
 
   /* ======================================================================
@@ -531,15 +692,23 @@
 
     var stream = makeStream(handlers);
     var gotData = false;
-    var watchdog = setTimeout(function () {
-      if (!gotData && !stream.isFinished()) {
+    var watchdog = null;
+    // 空闲看门狗：每收到一段数据就重新计时。之前只在「一个字都没收到」时才计时，
+    // 长回答/慢模型一旦中途卡住（连接半死、代理挂起）会永远 busy，界面再也发不出消息。
+    function armWatchdog() {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = setTimeout(function () {
+        if (stream.isFinished()) return;
         stream.finish();
-        handlers.onError && handlers.onError(new Error('响应超时（60 秒没有收到任何数据）'));
-      }
-    }, DATA_TIMEOUT);
+        handlers.onError && handlers.onError(new Error(gotData
+          ? '响应中断：60 秒没有收到新数据（网络或服务端卡住了）'
+          : '响应超时（60 秒没有收到任何数据）'));
+      }, DATA_TIMEOUT);
+    }
+    armWatchdog();
 
-    function noteData() { gotData = true; }
-    function clear() { clearTimeout(watchdog); }
+    function noteData() { gotData = true; armWatchdog(); }
+    function clear() { if (watchdog) { clearTimeout(watchdog); watchdog = null; } }
 
     if (window.reqnode) {
       var aborted = false;
@@ -1127,6 +1296,112 @@
     return { filePath: getFilePath(), title: getTitle(), docText: getDocText() };
   }
 
+  /* ---------------- 选区上下文（会过期、可见、可手动移除） ---------------- */
+
+  function activeSelection() {
+    var s = state.lastSelection || '';
+    if (!s) return '';
+    if (state.lastSelectionTs && (Date.now() - state.lastSelectionTs) > SEL_TTL) {
+      // 十分钟前划的词不该悄悄混进这次提问 —— 这正是「答非所问」的典型来源
+      state.lastSelection = '';
+      state.lastSelectionTs = 0;
+      state.lastRange = null;
+      return '';
+    }
+    return s;
+  }
+
+  function clearSelection() {
+    state.lastSelection = '';
+    state.lastSelectionTs = 0;
+    state.lastRange = null;
+    renderCtxChips();
+  }
+
+  // 输入区上方的上下文 chips：当前文档 + 选区。主流 AI 客户端都会把「这次带了什么上下文」摊开给用户看。
+  function renderCtxChips() {
+    if (!els.ctxchips) return;
+    var bits = [];
+    var p = docKey() || state.docPath;
+    if (p) bits.push('<span class="tyai-ctxchip" title="' + esc(p) + '">' + icon('file', 11) + '<span>' + esc(docName(p)) + '</span></span>');
+    var sel = activeSelection();
+    if (sel) {
+      bits.push('<span class="tyai-ctxchip is-sel" title="' + esc(sel.slice(0, 120)) + '">' + icon('lines', 11) +
+        '<span>选区 ' + sel.length + ' 字</span>' +
+        '<button type="button" class="tyai-ctxchip-x" data-clear-sel="1" title="这次不带选区">' + icon('x', 10) + '</button></span>');
+    }
+    els.ctxchips.innerHTML = bits.join('');
+  }
+
+  /* ---------------- 文档切换 → 会话跟着切 ---------------- */
+
+  function normDoc(p) { return String(p || '').replace(/\//g, '\\'); }
+
+  function startDocWatch() {
+    if (docTimer) clearInterval(docTimer);
+    docTimer = setInterval(checkDocChange, 1200);
+  }
+
+  function checkDocChange() {
+    var p = normDoc(docKey());
+    if (p === state.docPath) return;
+    if (!p) { state.docPath = ''; renderCtxChips(); return; }
+    if (state.busy || agentRunning()) return;      // 生成中不动，下一拍再看
+    if (!CFG.autoDocSession) { state.docPath = p; renderCtxChips(); return; }
+    applyDocChange(p);
+  }
+
+  /* 换了 md 文件：不要拿上一篇的对话去答这篇的问题。
+     策略与主流 AI 客户端一致 —— 一个文档一段对话：
+       空会话 → 直接改绑；已有该文档的对话 → 切过去；都没有 → 新开一条。 */
+  function applyDocChange(p) {
+    state.docPath = p;
+    var name = docName(p);
+    var cur = curSession();
+    // 选区属于上一篇文档，跟着失效（这是「基于旧文件回答」的另一个来源）
+    state.lastSelection = '';
+    state.lastSelectionTs = 0;
+    state.lastRange = null;
+
+    if (cur.doc === p) { renderCtxChips(); return; }
+
+    // ① 这份文档已经有对话 → 切过去（必须在「空会话改绑」之前判断，
+    //    否则空着的 B 会话会被改绑成 A，而 A 原来那段对话永远回不去了）
+    for (var i = 0; i < state.sessions.length; i++) {
+      var s = state.sessions[i];
+      if (s.id !== cur.id && s.doc === p && (s.messages.length || s.agent)) {
+        switchSession(s.id, '已切换到《' + name + '》的对话');
+        renderCtxChips();
+        return;
+      }
+    }
+    // ② 当前会话是空的 → 直接改绑，不打扰用户
+    if (!cur.messages.length && !cur.agent) {
+      cur.doc = p;
+      cur.title = sessionTitleForDoc(p);
+      saveSessions();
+      renderSideList();
+      renderChat();
+      renderCtxChips();
+      return;
+    }
+    // ③ 都没有 → 为这份文档新开一条（旧对话留在侧栏）
+    var ns = newSession(sessionTitleForDoc(p), p);
+    state.sessions.unshift(ns);
+    state.curId = ns.id;
+    state.editFrom = null;
+    renderEditBar();
+    state.drafts[ns.id] = state.drafts[ns.id] || '';
+    composerInput.value = state.drafts[ns.id];
+    autoGrow();
+    saveSessions();
+    renderSideList();
+    renderChat();
+    renderCtxChips();
+    flash('已为《' + name + '》新建对话（上一篇的对话还在侧栏）');
+  }
+
+
   /* ======================================================================
    * 会话存储
    * ==================================================================== */
@@ -1142,12 +1417,24 @@
       if (!s.id) s.id = uid();
       if (!s.title) s.title = '新对话';
       if (!s.ts) s.ts = Date.now();
+      if (typeof s.doc !== 'string') s.doc = '';     // 会话绑定的 md 文件（旧数据没有这个字段）
+      s.messages = s.messages.filter(function (mm) {
+        // 脏消息（null / 非对象 / role 不认识）一律丢掉：渲染层假设结构完整
+        return mm && typeof mm === 'object' && (mm.role === 'user' || mm.role === 'assistant');
+      }).map(function (mm) {
+        return {
+          role: mm.role,
+          content: typeof mm.content === 'string' ? mm.content : '',
+          stopped: mm.stopped === true,
+          error: typeof mm.error === 'string' ? mm.error : '',
+        };
+      });
       normalizeAgent(s);   // agent 运行态兜底：结构损坏 / 硬中断残留都要能恢复
     }
     // 存储超量时按「最新在前」裁剪，与 saveSessions 的 slice(0, MAX) 口径一致；
     // 不裁的话下次保存会把多出来的旧会话静默丢掉
     if (state.sessions.length > MAX_SESSIONS) state.sessions = state.sessions.slice(0, MAX_SESSIONS);
-    if (!state.sessions.length) state.sessions.push(newSession('新对话'));
+    if (!state.sessions.length) state.sessions.push(newSession('新对话', normDoc(docKey())));
     var saved = null;
     try { saved = localStorage.getItem(STORE_KEY + '.cur'); } catch (e) {}
     state.curId = state.sessions.some(function (s) { return s.id === saved; }) ? saved : state.sessions[0].id;
@@ -1169,9 +1456,12 @@
         return {
           title: String(st.title || st.goal || '未命名步骤').slice(0, 30),
           goal: String(st.goal || '').slice(0, 200),
-          status: ['todo', 'doing', 'done', 'fail'].indexOf(st.status) >= 0 ? st.status : 'todo',
+          // stopped = 用户中途停止（不是失败，续跑会接着做）
+          status: ['todo', 'doing', 'done', 'fail', 'stopped'].indexOf(st.status) >= 0 ? st.status : 'todo',
           text: typeof st.text === 'string' ? st.text : '',
+          partial: typeof st.partial === 'string' ? st.partial : '',
           calls: Array.isArray(st.calls) ? st.calls.filter(function (c) { return c && typeof c === 'object'; }) : [],
+          fold: st.fold === true,
         };
       });
     if (['running', 'done', 'error', 'stopped'].indexOf(ag.status) < 0) ag.status = 'stopped';
@@ -1204,16 +1494,27 @@
     // 这里裁剪最占地方的正文与工具结果，保住任务结构（步骤/清单/状态/小结）。
     try {
       var slim = state.sessions.slice(0, MAX_SESSIONS).map(function (s) {
-        if (!s.agent || !Array.isArray(s.agent.steps)) return s;
         var copy = {};
         for (var k in s) copy[k] = s[k];
+        // 对话正文也压一压：长回答 + 长选区上下文很容易把 5MB 顶爆，
+        // 只保留最近 30 条、每条 6000 字，宁可截断也不要整份历史消失
+        copy.messages = (s.messages || []).slice(-30).map(function (m) {
+          return {
+            role: m.role,
+            content: String(m.content || '').slice(0, 6000),
+            stopped: m.stopped === true,
+            error: m.error || '',
+          };
+        });
+        if (!s.agent || !Array.isArray(s.agent.steps)) return copy;
         copy.agent = {
           task: s.agent.task, status: s.agent.status, calls: s.agent.calls,
           todo: s.agent.todo, summary: s.agent.summary, updated: s.agent.updated,
           steps: s.agent.steps.map(function (st) {
             return {
-              title: st.title, goal: st.goal, status: st.status,
+              title: st.title, goal: st.goal, status: st.status, fold: st.fold === true,
               text: String(st.text || '').slice(0, 400),
+              partial: String(st.partial || '').slice(0, 400),
               calls: (st.calls || []).slice(-3).map(function (c) {
                 return { tool: c.tool, ok: c.ok, result: String(c.result || '').slice(0, 200) };
               }),
@@ -1230,8 +1531,43 @@
   }
   var quotaWarned = false;
 
-  function newSession(title) {
-    return { id: uid(), title: title || '新对话', ts: Date.now(), messages: [] };
+  function newSession(title, doc) {
+    return {
+      id: uid(),
+      title: title || '新对话',
+      ts: Date.now(),
+      messages: [],
+      doc: typeof doc === 'string' ? doc : '',
+    };
+  }
+
+  /* ---------------- 文档 ↔ 会话绑定 ---------------- */
+
+  function docKey() {
+    try { return getFilePath() || ''; } catch (e) { return ''; }
+  }
+
+  function docName(p) {
+    var s = String(p || '');
+    return s ? s.split(/[\\/]/).pop() : '';
+  }
+
+  // 新建会话时带上当前文档名，让侧栏一眼看出这段对话属于哪篇文件
+  function sessionTitleForDoc(doc, firstAsk) {
+    if (firstAsk) return String(firstAsk).slice(0, 18) || '新对话';
+    return docName(doc) || '新对话';
+  }
+
+  // 把会话绑定到当前文档（已有绑定不覆盖）
+  function bindSessionDoc(s, doc) {
+    if (!s) return;
+    var d = normDoc(typeof doc === 'string' ? doc : docKey());
+    if (!d) return;
+    if (s.doc !== d) {
+      s.doc = d;
+      if (!s.messages.length && !s.agent) s.title = sessionTitleForDoc(d);
+      saveSessions();
+    }
   }
 
   function curSession() {
@@ -1311,7 +1647,7 @@
       '    <aside class="tyai-side" id="tyai-side">' +
       '      <div class="tyai-side-top">' +
       '        <button class="tyai-side-new" id="tyai-side-new">' + icon('plus', 14) + '<span>新对话</span></button>' +
-      '        <button class="tyai-icobtn" id="tyai-side-fold" title="收起会话栏">' + icon('sidebar', 15) + '</button>' +
+      '        <button class="tyai-icobtn" id="tyai-side-fold" title="收起会话栏（Esc / Ctrl+Alt+B）">' + icon('x', 15) + '</button>' +
       '      </div>' +
       '      <div class="tyai-side-search">' + icon('search', 13) +
       '        <input id="tyai-side-q" type="text" placeholder="搜索历史会话" spellcheck="false">' +
@@ -1353,7 +1689,7 @@
 
       // ---------- 快捷 ----------
       '    <div class="tyai-view tyai-view-quick" id="tyai-view-quick">' +
-      '      <div class="tyai-scroll tyai-quickwrap">' +
+      '      <div class="tyai-scroll tyai-quickwrap" id="tyai-quickwrap">' +
       '        <div class="tyai-scenes">' +
       SCENE_LIST.map(function (s) {
         return '<button class="tyai-scene" data-scene="' + s.id + '">' +
@@ -1370,6 +1706,13 @@
 
       // ---------- 输入区 ----------
       '  <div class="tyai-foot">' +
+      // 流式期间「回到底部」：挂在输入区上方（随输入区高度浮动，不会压住发送键）
+      '    <button type="button" class="tyai-jump" id="tyai-jump" title="回到底部">' + icon('down', 14) + '<span>回到底部</span></button>' +
+      '    <div class="tyai-editbar" id="tyai-editbar" hidden>' +
+      '      <span>正在编辑这条提问，发送后会覆盖它之后的回答</span>' +
+      '      <button type="button" id="tyai-edit-cancel">取消</button>' +
+      '    </div>' +
+      '    <div class="tyai-ctxchips" id="tyai-ctxchips"></div>' +
       '    <div class="tyai-actions" id="tyai-actions">' +
       '      <button data-act="copy">' + icon('copy', 14) + '复制</button>' +
       '      <button data-act="insert">' + icon('insert', 14) + '插入文档</button>' +
@@ -1410,6 +1753,12 @@
       '        <label class="tyai-field"><span>API Key</span><span class="tyai-keywrap"><input id="tyai-f-key" type="password" spellcheck="false" placeholder="sk-..."><button class="tyai-icobtn" id="tyai-f-eye" title="显示 / 隐藏">' + icon('eye', 15) + '</button></span></label>' +
       '        <div class="tyai-field"><span>温度 <i id="tyai-f-tempv">0.7</i></span><input id="tyai-f-temp" type="range" min="0" max="1.5" step="0.1"></div>' +
       '        <label class="tyai-field"><span>上下文上限（字符）</span><input id="tyai-f-maxctx" type="number" min="1000" max="200000" step="1000"></label>' +
+      '        <div class="tyai-field"><span>交互（点一下即生效）</span>' +
+      '          <div class="tyai-opts" id="tyai-f-flags">' +
+      '            <button type="button" class="tyai-opt" data-flag="autoDocSession">按文档切换对话</button>' +
+      '            <button type="button" class="tyai-opt" data-flag="closeOnOutside">点面板外收起</button>' +
+      '          </div>' +
+      '        </div>' +
       '        <p class="tyai-note">Key 只保存在本机，不会上传；换一台电脑需重新填写。</p>' +
       '        <p class="tyai-note" id="tyai-kernel-note"></p>' +
       '        <div class="tyai-testbox" id="tyai-testbox"></div>' +
@@ -1437,6 +1786,7 @@
     els.msgs = $('tyai-msgs');
     els.timeline = $('tyai-timeline');
     els.quickResult = $('tyai-quick-result');
+    els.quickWrap = $('tyai-quickwrap');
     els.ctx = $('tyai-ctx');
     els.actions = $('tyai-actions');
     els.modelName = $('tyai-model-name');
@@ -1445,6 +1795,12 @@
     els.side = $('tyai-side');
     els.sideList = $('tyai-side-list');
     els.sideQ = $('tyai-side-q');
+    els.ctxchips = $('tyai-ctxchips');
+    els.editbar = $('tyai-editbar');
+    jumpEl = $('tyai-jump');
+    attachScrollAnchor(els.msgs);
+    attachScrollAnchor(els.timeline);
+    attachScrollAnchor(els.quickWrap);
     // 会话栏展开状态（持久化；窄屏默认收起，避免主区被挤没）
     var sideSaved = null;
     try { sideSaved = localStorage.getItem('tyai.side'); } catch (e) {}
@@ -1455,8 +1811,11 @@
 
     bindUI();
     loadSessions();
+    state.docPath = normDoc(docKey());   // 记住启动时打开的文档，之后靠轮询发现切换
+    startDocWatch();
     syncModelUI();
     renderChat();
+    renderCtxChips();
     updateStatus();
     updateActions();
     switchTab(state.tab);
@@ -1473,6 +1832,21 @@
 
     $('tyai-close').addEventListener('click', function () { togglePanel(false); });
 
+    // 「回到底部」：把当前滚动区拉回底部并恢复跟随
+    jumpEl.addEventListener('click', function () {
+      var el = jumpEl.__target || activeScroller();
+      if (el) { el.__tyaiStick = true; el.scrollTop = el.scrollHeight; }
+      hideJump();
+    });
+
+    // 编辑重发：取消
+    $('tyai-edit-cancel').addEventListener('click', cancelEdit);
+
+    // 上下文 chips：手动移除选区
+    els.ctxchips.addEventListener('click', function (e) {
+      if (e.target.closest('[data-clear-sel]')) clearSelection();
+    });
+
     // 选中浮窗
     bubble.addEventListener('click', function (e) {
       var btn = e.target.closest('button');
@@ -1483,7 +1857,7 @@
       if (scene) { togglePanel(true); runScene(scene, state.lastSelection); }
       else if (btn.getAttribute('data-act') === 'chat') {
         switchTab('chat');
-        composerInput.value = '关于我选中的这段内容：\n「' + (state.lastSelection || '').slice(0, 500) + '」\n';
+        composerInput.value = '关于我选中的这段内容：\n「' + (activeSelection() || '').slice(0, 500) + '」\n';
         autoGrow();
         togglePanel(true);
         setTimeout(function () { composerInput.focus(); }, 150);
@@ -1509,8 +1883,22 @@
       // isComposing 为主、keyCode 229 为老内核兜底，两者有一个成立就不发。
       var composing = e.isComposing || e.keyCode === 229;
       if (e.key === 'Enter' && !e.shiftKey && !composing) { e.preventDefault(); onPrimaryAction(); }
+      // 空输入框按 ↑：把上一条提问拿回来编辑（主流 AI 客户端的通用手感）
+      if (e.key === 'ArrowUp' && !composing && !composerInput.value && state.tab === 'chat') {
+        var s = curSession();
+        for (var i = s.messages.length - 1; i >= 0; i--) {
+          if (s.messages[i].role === 'user') {
+            e.preventDefault();
+            beginEdit(i);
+            return;
+          }
+        }
+      }
     });
-    composerInput.addEventListener('input', autoGrow);
+    composerInput.addEventListener('input', function () {
+      autoGrow();
+      state.drafts[state.curId] = composerInput.value;
+    });
 
     // 兼容 Chromium 59：内核没有 :focus-within，用 class 模拟输入框聚焦高亮
     var boxEl = $('tyai-box');
@@ -1531,6 +1919,17 @@
     $('tyai-f-save').addEventListener('click', saveSheet);
     $('tyai-sheet-close').addEventListener('click', closeSheet);
     $('tyai-sheet-mask').addEventListener('click', closeSheet);
+    // 交互开关：点一下即时生效（不等「保存」）
+    $('tyai-f-flags').addEventListener('click', function (e) {
+      var b = e.target.closest('.tyai-opt[data-flag]');
+      if (!b) return;
+      var k = b.getAttribute('data-flag');
+      CFG[k] = !CFG[k];
+      if (k === 'autoDocSession' && CFG[k]) state.docPath = docKey();
+      saveCfg();
+      renderFlagOpts();
+      flash((CFG[k] ? '已开启：' : '已关闭：') + (k === 'autoDocSession' ? '按文档切换对话' : '点面板外收起'));
+    });
 
     // 结果操作
     els.actions.addEventListener('click', function (e) {
@@ -1553,18 +1952,17 @@
       runAgent(text);
     });
 
-    // 时间线：工具卡展开/收起（toolcall 卡在时间线内，委托挂这里）
-    els.timeline.addEventListener('click', function (e) {
-      var tc = e.target.closest('[data-tool-toggle]');
-      if (tc) tc.classList.toggle('open');
-    });
-
     // ---------- 历史会话栏 ----------
     $('tyai-side-new').addEventListener('click', function () {
       if (agentRunning()) { flash('智能体任务正在运行，先停止或等它完成再新建会话'); return; }
-      var s = newSession('新对话');
+      var s = newSession(sessionTitleForDoc(docKey()));
+      bindSessionDoc(s, docKey());
       state.sessions.unshift(s);
       state.curId = s.id;
+      state.editFrom = null;
+      renderEditBar();
+      composerInput.value = state.drafts[s.id] || '';   // 新会话是干净的输入框（旧草稿留在原会话）
+      autoGrow();
       saveSessions();
       renderSideList();
       renderChat();
@@ -1586,36 +1984,48 @@
       }
       var item = e.target.closest('.tyai-side-item');
       if (!item) return;
-      var id = item.getAttribute('data-id');
-      if (id === state.curId) return;
-      if (agentRunning()) { flash('智能体任务正在运行，先停止或等它完成再切换会话'); return; }
-      state.curId = id;
-      saveSessions();
-      renderSideList();
-      renderChat();
-      // 快捷结果不随会话持久化：切走后必须清掉，否则会看到上一个会话的残留
-      if (state.tab === 'quick') {
-        state.lastResult = '';
-        state.lastScene = null;
-        state.lastQuestion = '';
-        els.quickResult.innerHTML = '';
-        updateActions();
-      }
+      switchSession(item.getAttribute('data-id'));
+    });
+    // 双击标题改名（主流侧栏都有，长对话靠自动标题很难认）
+    els.sideList.addEventListener('dblclick', function (e) {
+      var item = e.target.closest('.tyai-side-item');
+      if (item) startRename(item.getAttribute('data-id'));
     });
 
-    // 消息流内嵌按钮：单条复制 + 代码块复制（独立类名 + 容器委托，避免被通用处理器误接）
+    // 消息流内嵌按钮：单条复制 / 重新生成 / 继续 / 编辑重发 / 代码块复制
     els.msgs.addEventListener('click', function (e) {
       var codeBtn = e.target.closest('.tyai-code-copy');
       if (codeBtn) { copyText(codeBtn.getAttribute('data-code') || ''); return; }
-      var msgBtn = e.target.closest('.tyai-msg-copy');
-      if (!msgBtn) return;
-      var msg = msgBtn.closest('.tyai-msg');
-      var textEl = msg && msg.querySelector('.tyai-msg-text');
-      if (textEl) copyText(textEl.innerText || textEl.textContent || '');
+      var actBtn = e.target.closest('[data-msg-act]');
+      if (!actBtn) return;
+      var wrap = actBtn.closest('.tyai-msg');
+      if (!wrap) return;
+      var idx = parseInt(wrap.getAttribute('data-idx'), 10);
+      var act = actBtn.getAttribute('data-msg-act');
+      var s = curSession();
+      var m = s.messages[idx];
+      if (!m) return;
+      if (act === 'copy') copyText(m.content || '');
+      else if (act === 'regen') regenFrom(idx);
+      else if (act === 'continue') continueChat(idx);
+      else if (act === 'edit') beginEdit(idx);
     });
+
+    // 时间线：代码复制 / 工具卡展开 / 步骤折叠
     els.timeline.addEventListener('click', function (e) {
       var codeBtn = e.target.closest('.tyai-code-copy');
-      if (codeBtn) copyText(codeBtn.getAttribute('data-code') || '');
+      if (codeBtn) { copyText(codeBtn.getAttribute('data-code') || ''); return; }
+      var tc = e.target.closest('[data-tool-toggle]');
+      if (tc) { tc.classList.toggle('open'); return; }
+      var head = e.target.closest('.tyai-step-head');
+      if (!head) return;
+      var card = head.closest('.tyai-step');
+      var a = agentState();
+      var si = card ? parseInt(card.getAttribute('data-step'), 10) : -1;
+      if (a && a.steps[si]) {
+        a.steps[si].fold = !a.steps[si].fold;
+        card.classList.toggle('collapsed', a.steps[si].fold);
+      }
     });
 
     // 快捷场景
@@ -1624,11 +2034,10 @@
       if (btn) runScene(btn.getAttribute('data-scene'));
     });
 
-    // 点空白关闭弹层 / 收回面板
+    // 点空白关闭弹层（面板是否跟着收，由设置里的开关决定）
     document.addEventListener('mousedown', function (e) {
-      // 点面板外（Typora 正文、菜单、文件树等任意位置）自动收回面板；
-      // 悬浮球除外——它的 click 负责 toggle，这里关掉会被 click 再打开，表现为「点球关不掉」
-      if (state.open && !panel.contains(e.target) && !ball.contains(e.target)) {
+      // 悬浮球除外——它的 click 负责 toggle，这里关掉会被 click 再打开
+      if (CFG.closeOnOutside && state.open && !panel.contains(e.target) && !ball.contains(e.target)) {
         togglePanel(false);
       }
       if (!els.popModel.hidden && !els.popModel.contains(e.target) && !$('tyai-model-pill').contains(e.target)) els.popModel.hidden = true;
@@ -1637,15 +2046,26 @@
 
     // 快捷键
     window.addEventListener('keydown', function (e) {
+      // 侧栏重命名输入框里按 Esc 只取消改名，不要把面板一起关了
+      if (e.target && e.target.className === 'tyai-side-rename') return;
       if (e.ctrlKey && e.altKey && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         e.stopPropagation();
         togglePanel();
+        return;
+      }
+      if (e.ctrlKey && e.altKey && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        e.stopPropagation();
+        setSideOpen(!sideOpen());
+        return;
       }
       if (e.key === 'Escape') {
         if (bubble.classList.contains('on')) hideBubble();
         else if (!els.popModel.hidden) els.popModel.hidden = true;
         else if (!els.sheet.hidden) closeSheet();
+        else if (state.busy) stopGen();               // 主流约定：Esc = 立即停止生成
+        else if (sideOpen()) setSideOpen(false);      // 再按一次 = 收起会话栏
         else if (state.open) togglePanel(false);
       }
     }, true);
@@ -1765,6 +2185,7 @@
 
     sheetProvider = presetProvider || CFG.provider || 'custom';
     renderProviderOpts();
+    renderFlagOpts();
     refreshModelSuggest();
 
     $('tyai-f-baseurl').value = CFG.baseUrl || '';
@@ -1805,6 +2226,19 @@
     refreshModelSuggest();
   }
 
+  // 交互开关（开 / 关 两态，仍用按钮组，避免原生 checkbox 在旧内核里样式失控）
+  function renderFlagOpts() {
+    var box = $('tyai-f-flags');
+    if (!box) return;
+    var list = box.querySelectorAll('.tyai-opt[data-flag]');
+    for (var i = 0; i < list.length; i++) {
+      var k = list[i].getAttribute('data-flag');
+      var on = !!CFG[k];
+      list[i].classList.toggle('on', on);
+      list[i].title = on ? '已开启，点击关闭' : '已关闭，点击开启';
+    }
+  }
+
   // 模型：输入框 + 常用模型快捷 chips（不用原生 datalist）
   function refreshModelSuggest() {
     var box = $('tyai-model-suggest');
@@ -1826,6 +2260,10 @@
       apiKey: String($('tyai-f-key').value || '').trim(),
       temperature: Number($('tyai-f-temp').value),
       maxContextChars: Number($('tyai-f-maxctx').value) || 12000,
+      // 这两个开关不在抽屉里编辑，但重新赋值 CFG 时不能把它们丢掉
+      closeOnOutside: !!CFG.closeOnOutside,
+      autoDocSession: CFG.autoDocSession !== false,
+      kernel: CFG.kernel,
     };
   }
 
@@ -1910,6 +2348,13 @@
     if (on) renderSideList();
   }
 
+  function sideOpen() { return panel.classList.contains('side-on'); }
+
+  function sessionById(id) {
+    for (var i = 0; i < state.sessions.length; i++) if (state.sessions[i].id === id) return state.sessions[i];
+    return null;
+  }
+
   function fmtTime(ts) {
     var d = new Date(ts || Date.now());
     var now = new Date();
@@ -1925,6 +2370,7 @@
     var list = state.sessions.filter(function (s) {
       if (!q) return true;
       if (String(s.title || '').toLowerCase().indexOf(q) >= 0) return true;
+      if (s.doc && docName(s.doc).toLowerCase().indexOf(q) >= 0) return true;
       // 标题只是首问的前 18 字，容易搜不到；再拿用户消息内容兜底（每条截前 500 字）
       var msgs = s.messages || [];
       for (var i = 0; i < msgs.length; i++) {
@@ -1939,12 +2385,80 @@
       return;
     }
     els.sideList.innerHTML = list.map(function (s) {
+      var running = s.agent && s.agent.status === 'running';
+      var cnt = (s.messages ? s.messages.length : 0) + (s.agent ? 1 : 0);
+      var dn = s.doc ? docName(s.doc) : '';
+      if (dn && dn === s.title) dn = '';      // 标题就是文件名时不重复挂牌
       return '<div class="tyai-side-item' + (s.id === state.curId ? ' on' : '') + '" data-id="' + s.id + '">' +
         '<div class="tyai-side-item-tx"><b>' + esc(s.title || '新对话') + '</b>' +
-        '<i>' + fmtTime(s.ts) + ' · ' + (s.messages ? s.messages.length : 0) + ' 条</i></div>' +
+        '<i>' + (running ? '<span class="tyai-side-run">运行中</span>' : '') +
+        (dn ? '<span class="tyai-side-doc" title="' + esc(s.doc) + '">' + esc(dn) + '</span>' : '') +
+        fmtTime(s.ts) + ' · ' + cnt + ' 条</i></div>' +
         '<button type="button" class="tyai-side-del" data-id="' + s.id + '" title="删除会话">' + icon('trash', 12) + '</button>' +
         '</div>';
     }).join('');
+  }
+
+  // 侧栏双击标题就地改名（自动标题认不出是哪篇文件/哪次讨论）
+  function startRename(id) {
+    var s = sessionById(id);
+    if (!s) return;
+    var item = els.sideList.querySelector('.tyai-side-item[data-id="' + id + '"]');
+    if (!item || item.querySelector('.tyai-side-rename')) return;
+    var b = item.querySelector('.tyai-side-item-tx b');
+    if (!b) return;
+    var input = document.createElement('input');
+    input.className = 'tyai-side-rename';
+    input.type = 'text';
+    input.maxLength = 40;
+    input.value = s.title || '';
+    b.style.display = 'none';
+    b.parentNode.insertBefore(input, b);
+    input.focus();
+    input.select();
+    var done = false;
+    function finish(save) {
+      if (done) return;
+      done = true;
+      var v = String(input.value || '').trim();
+      if (save && v) { s.title = v.slice(0, 40); saveSessions(); }
+      if (input.parentNode) input.parentNode.removeChild(input);
+      b.style.display = '';
+      renderSideList();
+    }
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); finish(false); }
+    });
+    input.addEventListener('blur', function () { finish(true); });
+  }
+
+  // 切换会话：所有入口（侧栏点击 / 文档切换 / 删除后回退）共用这一条路径，
+  // 免得各处逻辑分叉后出现「这个入口清了快捷结果、那个入口没清」这类不一致。
+  function switchSession(id, note) {
+    if (!id || id === state.curId) return;
+    if (agentRunning()) { flash('智能体任务正在运行，先停止或等它完成再切换会话'); return; }
+    // 存下当前会话的草稿，恢复目标会话的草稿
+    state.drafts[state.curId] = composerInput.value;
+    state.curId = id;
+    state.editFrom = null;
+    renderEditBar();
+    composerInput.value = state.drafts[id] || '';
+    autoGrow();
+    saveSessions();
+    renderSideList();
+    renderChat();
+    renderCtxChips();
+    // 快捷结果不随会话持久化：切走后必须清掉，否则会看到上一个会话的残留
+    if (state.tab === 'quick') {
+      state.lastResult = '';
+      state.lastScene = null;
+      state.lastQuestion = '';
+      els.quickResult.innerHTML = '';
+      updateActions();
+    }
+    if (state.tab === 'agent') renderAgent();
+    if (note) flash(note);
   }
 
   function deleteSession(id) {
@@ -1956,13 +2470,24 @@
       flash('这个会话的智能体还在运行，先停止再删除');
       return;
     }
-    var wasCur = state.sessions[idx].id === state.curId;
+    // 正在这条会话里流式输出时删掉它，收尾逻辑会往一个已经不在列表里的对象写数据
+    if (state.stream && state.stream.sess === target) {
+      flash('这条会话正在生成回答，先停止再删除');
+      return;
+    }
+    var wasCur = target.id === state.curId;
     state.sessions.splice(idx, 1);
-    if (!state.sessions.length) state.sessions.push(newSession('新对话'));
-    if (wasCur || !curSession()) state.curId = state.sessions[0].id;
+    if (!state.sessions.length) state.sessions.push(newSession('新对话', docKey()));
+    if (wasCur) state.curId = state.sessions[0].id;
     saveSessions();
     renderSideList();
-    if (wasCur) { renderChat(); if (state.tab !== 'chat') switchTab('chat'); }
+    if (wasCur) {
+      composerInput.value = state.drafts[state.curId] || '';
+      autoGrow();
+      renderChat();
+      renderCtxChips();
+      if (state.tab !== 'chat') switchTab('chat');
+    }
     flash('已删除会话');
   }
 
@@ -1981,7 +2506,9 @@
       var text = String(sel).trim();
       if (!text) { hideBubble(); return; }
       state.lastSelection = text;
+      state.lastSelectionTs = Date.now();
       state.lastRange = range.cloneRange();
+      renderCtxChips();
       showBubble(range);
     }, 250);
   }
@@ -2010,6 +2537,8 @@
     if (state.open) {
       hideBubble();
       els.popModel.hidden = true;
+      checkDocChange();          // 面板收着的时候可能已经换了 md 文件
+      renderCtxChips();
       composerInput.focus();
       // 首次使用且确实没有可用 Key 时，主动弹出配置（桥接模式下 Key 在服务端，不需要）
       if (MODE === 'direct' && !hasKey() && !localStorage.getItem('tyai.onboarded')) {
@@ -2027,11 +2556,13 @@
     document.querySelectorAll('.tyai-view').forEach(function (v) {
       v.classList.toggle('on', v.id === 'tyai-view-' + tab);
     });
-    if (tab === 'chat') composerInput.placeholder = '问点什么…（Enter 发送）';
+    if (tab === 'chat') composerInput.placeholder = '问点什么…（Enter 发送，Shift+Enter 换行）';
     else if (tab === 'agent') composerInput.placeholder = '描述你的学习任务，例如：把这篇文档整理成复习笔记';
     else composerInput.placeholder = '针对选中内容追问…';
     if (tab === 'quick') renderContext();
     if (tab === 'agent' && !state.busy) renderAgent();   // 恢复持久化的运行状态
+    if (tab === 'chat') renderCtxChips();
+    hideJump();
     updateActions();
   }
 
@@ -2082,18 +2613,10 @@
       else flash('还没有可重答的内容');
       return;
     }
+    // 对话：直接重新生成最后一条回答（走 regenFrom，保留提问，不会把提问也删掉）
     var s = curSession();
     for (var i = s.messages.length - 1; i >= 0; i--) {
-      if (s.messages[i].role === 'user') {
-        // 去掉这条提问与之后的回答，重新发一次
-        var q = s.messages[i].content;
-        s.messages = s.messages.slice(0, i);
-        saveSessions();
-        renderChat();
-        composerInput.value = q;
-        sendChat();
-        return;
-      }
+      if (s.messages[i].role === 'assistant') { regenFrom(i); return; }
     }
     flash('还没有可重新生成的回答');
   }
@@ -2167,78 +2690,255 @@
       updateActions();
       return;
     }
-    els.msgs.innerHTML = s.messages.map(function (m, i) { return msgHTML(m.role, m.content, i); }).join('');
+    els.msgs.innerHTML = s.messages.map(function (m, i) { return msgHTML(m, i); }).join('');
     scrollBottom(els.msgs);
     updateActions();
   }
 
-  function msgHTML(role, content, idx) {
-    var isUser = role === 'user';
+  // 每条消息右上角的操作条（悬停出现）：复制 / 编辑重发 / 重新生成 / 继续
+  function msgActsHTML(m) {
+    if (m.pending) return '';        // 流式中不提供操作，避免中断自己
+    var acts = ['<button type="button" class="tyai-mact" data-msg-act="copy" title="复制这条">' + icon('copy', 12) + '</button>'];
+    if (m.role === 'user') {
+      acts.push('<button type="button" class="tyai-mact" data-msg-act="edit" title="编辑并重发（会覆盖其后的回答）">' + icon('edit', 12) + '</button>');
+    } else {
+      if (m.stopped) acts.push('<button type="button" class="tyai-mact" data-msg-act="continue" title="从中断处继续">继续</button>');
+      acts.push('<button type="button" class="tyai-mact" data-msg-act="regen" title="重新生成这条回答">' + icon('redo', 12) + '</button>');
+    }
+    return '<div class="tyai-msg-acts' + ((m.stopped || m.error) ? ' is-pinned' : '') + '">' + acts.join('') + '</div>';
+  }
+
+  function msgHTML(m, idx) {
+    var isUser = m.role === 'user';
+    var body;
+    if (isUser) {
+      body = '<p>' + esc(m.content).replace(/\n/g, '<br>') + '</p>';
+    } else if (!m.content) {
+      body = m.pending
+        ? '<div class="tyai-loading"><span></span><span></span><span></span></div>'
+        : '<p class="tyai-empty">（空回答）</p>';
+    } else {
+      body = mdToHtml(m.content);
+    }
+    var tail = '';
+    if (m.stopped) tail += '<div class="tyai-msg-stopped">' + icon('stop', 11) + '<span>已停止生成</span></div>';
+    if (m.error) tail += '<div class="tyai-err">' + esc(m.error) + '</div>';
     return '<div class="tyai-msg tyai-msg-' + (isUser ? 'user' : 'assistant') + '" data-idx="' + idx + '">' +
       '<div class="tyai-msg-avatar">' + (isUser ? '你' : logoMark(24)) + '</div>' +
-      '<div class="tyai-msg-body"><div class="tyai-msg-text">' +
-      (isUser ? '<p>' + esc(content).replace(/\n/g, '<br>') + '</p>' : mdToHtml(content)) +
-      '</div>' +
-      '<button type="button" class="tyai-msg-copy" title="复制这条内容">' + icon('copy', 12) + '</button>' +
+      '<div class="tyai-msg-body"><div class="tyai-msg-text">' + body + '</div>' + tail +
+      msgActsHTML(m) +
       '</div></div>';
   }
 
-  function scrollBottom(el) { el.scrollTop = el.scrollHeight; }
-
-  function sendChat() {
-    var q = composerInput.value.trim();
-    if (!q || state.busy) return;
+  // 只重绘某一条（收尾 / 状态变化用），不整列表重排 —— 避免视口跳动
+  function refreshMsg(idx) {
     var s = curSession();
-    s.messages.push({ role: 'user', content: q });
-    var titled = false;
-    if (s.messages.length === 1) { s.title = q.slice(0, 18) || '新对话'; titled = true; }
-    if (s.messages.length > MAX_TURNS) s.messages = s.messages.slice(-MAX_TURNS);
-    saveSessions();
-    if (titled) renderSideList();
+    var m = s.messages[idx];
+    var cur = els.msgs.querySelector('.tyai-msg[data-idx="' + idx + '"]');
+    if (!m || !cur) return null;
+    var box = document.createElement('div');
+    box.innerHTML = msgHTML(m, idx);
+    var node = box.firstChild;
+    cur.parentNode.replaceChild(node, cur);
+    return node;
+  }
 
-    if (els.msgs.querySelector('.tyai-home')) els.msgs.innerHTML = '';
-    els.msgs.insertAdjacentHTML('beforeend', msgHTML('user', q, s.messages.length - 1));
+  function msgTextEl(idx) {
+    return els.msgs.querySelector('.tyai-msg[data-idx="' + idx + '"] .tyai-msg-text');
+  }
+
+  // 模型历史：跳过空占位（流式中的半成品不算），单条截断防止一篇长文档撑爆上下文
+  function historyForApi(s, upto) {
+    var out = [];
+    var end = (upto == null) ? s.messages.length : upto;
+    for (var i = 0; i < end && i < s.messages.length; i++) {
+      var m = s.messages[i];
+      if (!m || !m.content) continue;
+      out.push({ role: m.role, content: String(m.content).slice(0, 16000) });
+    }
+    return out;
+  }
+
+  // 只保留最近 MAX_TURNS 条，且不要从一条「回答」中间开始（否则模型会看到没有提问的回答）
+  // 返回 true 表示真的裁过 —— 调用方要整列表重绘，否则 DOM 上的条数会和数据对不上
+  function trimMessages(s) {
+    if (s.messages.length <= MAX_TURNS) return false;
+    var cut = s.messages.length - MAX_TURNS;
+    while (cut < s.messages.length && s.messages[cut].role !== 'user') cut++;
+    s.messages = s.messages.slice(cut);
+    return true;
+  }
+
+  function sendChat(forcedText) {
+    var q = (typeof forcedText === 'string' ? forcedText : composerInput.value).trim();
+    if (!q || state.busy) return;
+    if (state.editFrom != null) {  // 编辑态下发送 = 从那条提问起重来
+      var from = state.editFrom;
+      state.editFrom = null;
+      renderEditBar();
+      var se = curSession();
+      se.messages = se.messages.slice(0, from);
+      renderChat();               // 先把被覆盖掉的旧回答从界面上真的清掉
+      composerInput.value = q;
+      autoGrow();
+      return sendChat(q);
+    }
+
+    var s = curSession();
+    bindSessionDoc(s, docKey());
+    var first = s.messages.length === 0;
+    s.messages.push({ role: 'user', content: q });
+    if (first) s.title = sessionTitleForDoc(s.doc, q);
+    s.ts = Date.now();
+    var trimmed = trimMessages(s);
+    var uIdx = s.messages.length - 1;
+    s.messages.push({ role: 'assistant', content: '', pending: true });
+    var aIdx = s.messages.length - 1;
+    saveSessions();
+    renderSideList();
+
     composerInput.value = '';
     composerInput.style.height = 'auto';
-    scrollBottom(els.msgs);
+    state.drafts[s.id] = '';
 
-    var idx = s.messages.length;
-    els.msgs.insertAdjacentHTML('beforeend',
-      '<div class="tyai-msg tyai-msg-assistant" data-idx="' + idx + '"><div class="tyai-msg-avatar">' + logoMark(24) + '</div>' +
-      '<div class="tyai-msg-body"><div class="tyai-msg-text"><div class="tyai-loading"><span></span><span></span><span></span></div></div>' +
-      '<button type="button" class="tyai-msg-copy" title="复制这条内容">' + icon('copy', 12) + '</button></div></div>');
-    var textEl = els.msgs.querySelector('[data-idx="' + idx + '"] .tyai-msg-text');
+    if (trimmed) {
+      renderChat();             // 裁过历史：DOM 与数据必须一起重排
+    } else {
+      if (els.msgs.querySelector('.tyai-home')) els.msgs.innerHTML = '';
+      els.msgs.insertAdjacentHTML('beforeend', msgHTML(s.messages[uIdx], uIdx) + msgHTML(s.messages[aIdx], aIdx));
+    }
     scrollBottom(els.msgs);
     updateActions();
+    startChatStream(s, aIdx, '', null);
+  }
+
+  /* 流式回答的统一驱动：发送 / 继续 / 重新生成 / 编辑重发都走这里。
+     停止时不会丢内容：acc 一直同步在消息对象上，收尾只做落盘与状态标记。 */
+  function startChatStream(s, idx, base, reqMessages) {
+    var acc = base || '';
+    var finished = false;
+    var el = msgTextEl(idx);
+    state.stream = { kind: 'chat', sess: s, idx: idx, active: true };
+
+    function liveEl() {
+      // 用户切走再切回来会整列表重绘，手上这个节点就废了，按索引重新找
+      if (el && document.documentElement.contains(el)) return el;
+      el = msgTextEl(idx);
+      return el;
+    }
+
+    function paint() {
+      var m = s.messages[idx];
+      if (m) m.content = acc;
+      var node = liveEl();
+      if (node) paintStream(node, mdToHtml(acc) || '<p class="tyai-empty">…</p>', els.msgs);
+      if (acc) markJumpNew();
+    }
+
+    function finish(status, err) {
+      if (finished) return;
+      finished = true;
+      var m = s.messages[idx];
+      if (m) {
+        m.content = acc;
+        m.pending = false;
+        if (status === 'stopped') m.stopped = true;
+        // 出错时即使已经有半截内容也要把原因留下（半截正文 + 错误提示都给用户）
+        if (err) m.error = errText(err);
+      }
+      if (state.stream && state.stream.idx === idx && state.stream.sess === s) state.stream = null;
+      state.abort = null;
+      setBusy(false);
+      saveSessions();
+      renderSideList();
+      if (s === curSession()) {
+        if (!refreshMsg(idx)) renderChat();
+      }
+      updateActions();
+      renderCtxChips();
+    }
+
+    state.stream.finish = finish;
 
     setBusy(true);
-    var acc = '';
-
+    paint();
+    var msgs = reqMessages || historyForApi(s);
     state.abort = aiPost('/chat', {
-      messages: s.messages.map(function (m) { return { role: m.role, content: m.content }; }),
-      selection: state.lastSelection || '',
+      messages: msgs,
+      selection: activeSelection(),
       context: currentContext(),
     }, {
-      onFinish: function () { setBusy(false); updateActions(); },
       onDelta: function (d) {
         acc += d;
-        paintStream(textEl, mdToHtml(acc), els.msgs);
+        paint();
       },
-      onError: function (err) {
-        if (needsSetup(err)) { flushStream(textEl, '<div class="tyai-err">' + esc(errText(err)) + '<button class="tyai-inline-btn" data-open-cfg="1">去配置</button></div>'); }
-        else flushStream(textEl, '<div class="tyai-err">' + esc(errText(err)) + '</div>');
-        if (acc) s.messages.push({ role: 'assistant', content: acc });
-        saveSessions();
-        renderSideList();
-      },
-      onEnd: function () {
-        if (acc) s.messages.push({ role: 'assistant', content: acc });
-        else if (!textEl.querySelector('.tyai-err')) flushStream(textEl, '<p class="tyai-empty">模型没有返回内容。</p>');
-        saveSessions();
-        renderSideList();
-        updateActions();
-      },
+      onEnd: function () { finish('done'); },
+      onError: function (err) { finish('error', err); },
     });
+  }
+
+  // 从中断处继续（把已有的半截回答当作 assistant 历史，再补一句「接着写」的指令）
+  function continueChat(idx) {
+    if (state.busy) return;
+    var s = curSession();
+    var m = s.messages[idx];
+    if (!m || m.role !== 'assistant') return;
+    m.stopped = false;
+    m.error = '';
+    m.pending = true;
+    saveSessions();
+    if (refreshMsg(idx)) {
+      var req = historyForApi(s, idx + 1).concat([{
+        role: 'user',
+        content: '（继续）请从上次中断处接着写下去，不要重复已经输出过的内容，也不要重新开头。',
+      }]);
+      setBusy(true);
+      startChatStream(s, idx, m.content || '', req);
+    }
+  }
+
+  // 重新生成：从这一条回答之前的历史重来（默认作用于最后一条 assistant）
+  function regenFrom(idx) {
+    if (state.busy) return;
+    var s = curSession();
+    if (!s.messages.length) return;
+    if (typeof idx !== 'number' || idx < 0) {
+      for (var i = s.messages.length - 1; i >= 0; i--) if (s.messages[i].role === 'assistant') { idx = i; break; }
+    }
+    var m = s.messages[idx];
+    if (!m || m.role !== 'assistant') { flash('这条消息不能重新生成'); return; }
+    s.messages = s.messages.slice(0, idx);
+    s.messages.push({ role: 'assistant', content: '', pending: true });
+    var aIdx = s.messages.length - 1;
+    saveSessions();
+    renderChat();
+    setBusy(true);
+    startChatStream(s, aIdx, '', null);
+  }
+
+  // 编辑重发：把那条提问放进输入框，发送时覆盖它及其后的所有内容
+  function beginEdit(idx) {
+    if (state.busy) { flash('正在生成中，先停止再编辑'); return; }
+    var s = curSession();
+    var m = s.messages[idx];
+    if (!m || m.role !== 'user') return;
+    state.editFrom = idx;
+    composerInput.value = m.content || '';
+    autoGrow();
+    renderEditBar();
+    composerInput.focus();
+  }
+
+  function cancelEdit() {
+    state.editFrom = null;
+    composerInput.value = '';
+    autoGrow();
+    renderEditBar();
+  }
+
+  function renderEditBar() {
+    if (!els.editbar) return;
+    els.editbar.hidden = state.editFrom == null;
   }
 
   /* ---------------------------- 智能体模式 ---------------------------- */
@@ -2336,9 +3036,13 @@
   }
 
   function agentStepHTML(i, st) {
-    var cls = st.status === 'done' ? ' done' : st.status === 'fail' ? ' fail' : '';
-    return '<div class="tyai-step" data-step="' + i + '">' +
-      '<div class="tyai-step-head"><span class="tyai-step-dot' + cls + '"></span><b>第 ' + (i + 1) + ' 步 · ' + esc(st.title) + '</b>' +
+    var cls = st.status === 'done' ? ' done'
+      : st.status === 'fail' ? ' fail'
+        : st.status === 'stopped' ? ' stop' : '';
+    return '<div class="tyai-step' + (st.fold ? ' collapsed' : '') + '" data-step="' + i + '">' +
+      '<div class="tyai-step-head" title="点击折叠 / 展开这一步">' +
+      '<span class="tyai-step-dot' + cls + '"></span><b>第 ' + (i + 1) + ' 步 · ' + esc(st.title) + '</b>' +
+      '<span class="tyai-step-caret">' + icon('chevron', 12) + '</span>' +
       '<i class="tyai-step-goal">' + esc(st.goal || '') + '</i></div>' +
       '<div class="tyai-step-body">' +
       (st.status === 'doing' ? '<div class="tyai-loading"><span></span><span></span><span></span></div>' : '') +
@@ -2404,6 +3108,7 @@
       a = agentSess.agent = { task: task, steps: [], status: 'running', calls: 0, todo: null, summary: '' };
     }
     els.timeline.innerHTML = '';
+    state.stream = null;      // 智能体有自己的收尾路径，别让聊天流的 finish 混进来
     setBusy(true);
     agentPersist();
     renderAgent();
@@ -2411,21 +3116,31 @@
     var aborted = { v: false };
     var abortFn = null;
     var currentIdx = -1;
+    var lastAcc = '';        // 当前这一轮模型已经吐出来的原文（停止时用它保住半截成果）
 
     state.abort = function () {
       aborted.v = true;
       try { abortFn && abortFn(); } catch (e) {}
       var cur = agentSess && agentSess.agent;
       if (cur && cur.status === 'running') {
-        if (currentIdx >= 0 && cur.steps[currentIdx]) cur.steps[currentIdx].status = 'todo';
+        // 中断时把已经生成的部分写进步骤 —— 旧版只把状态改回 todo，半截内容直接丢，
+        // 用户点了停止就再也看不到刚才那几分钟的输出
+        if (currentIdx >= 0 && cur.steps[currentIdx]) {
+          var st = cur.steps[currentIdx];
+          var part = DP.stripToolBlocks(lastAcc).trim();
+          if (part) st.text = (st.text ? st.text + '\n\n' : '') + part;
+          st.partial = part;        // 续跑时作为起点提示模型「接着补」，而不是从头再写
+          st.status = 'stopped';
+        }
         cur.status = 'stopped';
         agentPersist();
+        renderAgent();          // 让「已停止」这一步的正文真正落到 DOM 上
         renderAgentHint();
       }
       agentSess = null;
       setBusy(false);
       updateActions();
-      flash('已停止，可点「继续」接着跑');
+      flash('已停止，已生成的内容保留；可点「继续」接着跑');
     };
 
     function callLLM(messages, temperature, onDone, onFail, onDelta) {
@@ -2435,10 +3150,12 @@
       }
       a.calls++;
       var acc = '';
+      lastAcc = '';
       abortFn = llmStream({ messages: messages, temperature: temperature }, {
         onDelta: function (d) {
           if (aborted.v) return;
           acc += d;
+          lastAcc = acc;
           if (onDelta) onDelta(d, acc);
         },
         onEnd: function () { if (!aborted.v) onDone(acc); },
@@ -2598,6 +3315,12 @@
       st.status = 'doing';
       st.text = st.text || '';
       st.calls = st.calls || [];
+      var resumePartial = st.partial || '';
+      st.partial = '';        // 只用一次，避免每轮都重复塞进提示词
+      // 前面的步骤已完成就折起来：长任务的正文会越来越长，不折会淹没当前步骤
+      for (var pi = 0; pi < idx; pi++) {
+        if (a.steps[pi] && a.steps[pi].status === 'done') a.steps[pi].fold = true;
+      }
       agentPersist();
       renderAgent();          // 重建卡片（含 loading 态）
       scrollBottom(els.timeline);
@@ -2621,10 +3344,13 @@
         }
         var user = '总任务：' + a.task +
           '\n当前执行第 ' + (idx + 1) + '/' + a.steps.length + ' 步：' + st.title + ' —— ' + st.goal +
-          (state.lastSelection ? '\n用户选中的内容（优先围绕它）：\n<<<\n' + String(state.lastSelection).slice(0, 4000) + '\n>>>' : '') +
+          (activeSelection() ? '\n用户选中的内容（优先围绕它）：\n<<<\n' + String(activeSelection()).slice(0, 4000) + '\n>>>' : '') +
           '\n文档上下文（可能截断，可用 read_document 重读）：\n<<<DOC\n' + getDocText() + '\nDOC>>>' +
           (prev.length ? '\n\n前面步骤的成果（衔接即可，不要重复）：\n' + prev.join('\n\n') : '') +
           todoBits +
+          // 上一次被人为中断过：把半截内容作为起点，让它接着补，而不是从头再写一遍
+          (resumePartial ? '\n\n本步上次被中途停止，已输出以下内容（请接着补全，不要重复已写的部分）：\n<<<\n' +
+            String(resumePartial).slice(-2000) + '\n>>>' : '') +
           '\n\n现在执行这一步。需要工具就调用（块放回复末尾），完成后直接输出给用户的最终内容。';
         var msgs = [{ role: 'system', content: DP.AGENT_LOOP_SYSTEM + agentMemoryBlock() }];
         msgs.push({ role: 'user', content: user });
@@ -2705,7 +3431,7 @@
         { role: 'system', content: DP.AGENT_PLAN_SYSTEM },
         { role: 'user', content: DP.agentPlanPrompt({
             task: a.task,
-            selection: state.lastSelection || '',
+            selection: activeSelection(),
             docText: getDocText(),
           }) },
       ], 0.3, function (acc) {
@@ -2727,7 +3453,7 @@
   /* ---------------------------- 快捷模式 ---------------------------- */
 
   function renderContext() {
-    var sel = state.lastSelection || '';
+    var sel = activeSelection();
     var file = getTitle();
     var doc = getDocText();
     var bits = [];
@@ -2740,8 +3466,8 @@
   function runScene(scene, forcedText, question) {
     if (state.busy) { flash('正在生成中，先等当前回答完成或点停止'); return; }
     switchTab('quick');
-    var sel = forcedText || state.lastSelection || getSelectionText() || '';
-    state.lastSelection = sel;
+    var sel = forcedText || activeSelection() || getSelectionText() || '';
+    if (sel) { state.lastSelection = sel; state.lastSelectionTs = Date.now(); renderCtxChips(); }
     // 记住本次追问的问题：之后点「重新生成」要原样重发，不能只剩一段选中内容
     state.lastQuestion = (scene === 'ask') ? String(question || '') : '';
     var docText = getDocText();
@@ -2754,27 +3480,46 @@
     state.lastScene = scene;
     state.lastResult = '';
     renderContext();
-    els.quickResult.innerHTML = '<div class="tyai-loading"><span></span><span></span><span></span></div>';
-    setBusy(true);
-
-    state.abort = aiPost('/ask', {
+    startQuickRequest({
       scene: scene,
       text: (scene === 'summarize' || scene === 'outline') ? docText : sel,
       question: String(question || ''),
       history: [],
       context: currentContext(),
-    }, {
-      onFinish: function () { setBusy(false); updateActions(); },
+    });
+  }
+
+  /* 快捷模式的统一驱动：和对话共用「可停止 + 停止后保留已生成内容」的行为 */
+  function startQuickRequest(body) {
+    var finished = false;
+    state.stream = { kind: 'quick', active: true };
+
+    function finish(status, err) {
+      if (finished) return;
+      finished = true;
+      state.stream = null;
+      state.abort = null;
+      if (!state.lastResult) {
+        showQuickError(err ? errText(err) : '模型没有返回内容，请重试。');
+      } else {
+        flushStream(els.quickResult, mdToHtml(state.lastResult));
+        if (err) els.quickResult.insertAdjacentHTML('beforeend', '<div class="tyai-err">' + esc(errText(err)) + '</div>');
+        else if (status === 'stopped') els.quickResult.insertAdjacentHTML('beforeend', '<div class="tyai-msg-stopped">已停止生成</div>');
+      }
+      setBusy(false);
+      updateActions();
+    }
+
+    state.stream.finish = finish;
+    setBusy(true);
+    els.quickResult.innerHTML = '<div class="tyai-loading"><span></span><span></span><span></span></div>';
+    state.abort = aiPost('/ask', body, {
       onDelta: function (d) {
         state.lastResult += d;
-        paintStream(els.quickResult, mdToHtml(state.lastResult) || '<p class="tyai-empty">…</p>', els.quickResult);
-        updateActions();
+        paintStream(els.quickResult, mdToHtml(state.lastResult), els.quickWrap);
       },
-      onError: function (err) { showQuickError(errText(err)); },
-      onEnd: function () {
-        if (!state.lastResult && !els.quickResult.querySelector('.tyai-err')) showQuickError('模型没有返回内容，请重试。');
-        updateActions();
-      },
+      onError: function (err) { finish('error', err); },
+      onEnd: function () { finish('done'); },
     });
   }
 
@@ -2812,7 +3557,7 @@
     }
     // quick：针对选中的内容追问
     if (!text) { flash('先写一句想问的话'); return; }
-    var sel = state.lastSelection || getSelectionText() || '';
+    var sel = activeSelection() || getSelectionText() || '';
     if (!sel) { flash('请先在正文里选中一段内容'); return; }
     composerInput.value = '';
     autoGrow();
@@ -2820,21 +3565,7 @@
     state.lastQuestion = text;
     state.lastResult = '';
     renderContext();
-    els.quickResult.innerHTML = '<div class="tyai-loading"><span></span><span></span><span></span></div>';
-    setBusy(true);
-    state.abort = aiPost('/ask', { scene: 'ask', text: sel, question: text, history: [], context: currentContext() }, {
-      onFinish: function () { setBusy(false); updateActions(); },
-      onDelta: function (d) {
-        state.lastResult += d;
-        paintStream(els.quickResult, mdToHtml(state.lastResult), els.quickResult);
-        updateActions();
-      },
-      onError: function (err) { showQuickError(errText(err)); },
-      onEnd: function () {
-        if (!state.lastResult && !els.quickResult.querySelector('.tyai-err')) showQuickError('模型没有返回内容，请重试。');
-        updateActions();
-      },
-    });
+    startQuickRequest({ scene: 'ask', text: sel, question: text, history: [], context: currentContext() });
   }
 
   /* ---------------------------- 忙碌与停止 ---------------------------- */
@@ -2844,8 +3575,9 @@
     var btn = $('tyai-send');
     btn.classList.toggle('stop', busy);
     btn.innerHTML = icon(busy ? 'stop' : 'send', 17);
-    btn.title = busy ? '停止生成' : '发送（Enter）';
-    if (!busy) state.abort = null;
+    btn.title = busy ? '停止生成（Esc）' : '发送（Enter）';
+    root.classList.toggle('tyai-busy', !!busy);   // 面板收起时悬浮球上留个小圆点
+    if (!busy) { state.abort = null; hideJump(); }
   }
 
   function stopGen() {
@@ -2853,10 +3585,14 @@
     // 注意不能带 state.tab 条件：Agent 跑着的时候用户可以切到别的 tab 再点停止，
     // 带了条件就会双重 flash。
     var wasAgent = agentRunning();
+    var st = state.stream;
     if (state.abort) { try { state.abort(); } catch (e) {} }
     state.abort = null;
-    setBusy(false);
-    if (!wasAgent) flash('已停止');
+    // 普通对话：走流式自己的收尾 —— 保留已生成内容、标「已停止」、给「继续」按钮。
+    // （旧版直接 setBusy(false)，半截回答从此丢失，切个会话就再也找不回来。）
+    if (st && st.finish) st.finish('stopped');
+    else setBusy(false);
+    if (!wasAgent) flash(st ? '已停止，已生成的内容保留' : '已停止');
   }
 
   /* ---------------------------- 输出落地 ---------------------------- */
@@ -2907,12 +3643,19 @@
   }
 
   function flash(msg) {
-    var tip = document.createElement('div');
-    tip.className = 'tyai-flash';
+    // 复用同一个提示节点：连续两次 flash（例如"新建对话 + 已切换"）时旧版会叠在一起糊成一团
+    var tip = root.querySelector('.tyai-flash');
+    if (!tip) {
+      tip = document.createElement('div');
+      tip.className = 'tyai-flash';
+      root.appendChild(tip);
+    }
     tip.textContent = msg;
-    root.appendChild(tip);
-    setTimeout(function () { tip.classList.add('off'); }, 1200);
-    setTimeout(function () { if (tip.parentNode) tip.remove(); }, 1700);
+    tip.classList.remove('off');
+    if (tip.__t1) clearTimeout(tip.__t1);
+    if (tip.__t2) clearTimeout(tip.__t2);
+    tip.__t1 = setTimeout(function () { tip.classList.add('off'); }, 1600);
+    tip.__t2 = setTimeout(function () { if (tip.parentNode) tip.parentNode.removeChild(tip); }, 2100);
   }
 
   /* ---------------------------- 拖动 ---------------------------- */
@@ -2993,6 +3736,15 @@
       mode: function () { return MODE; },
       sheet: openSheet,
       modelPop: toggleModelPop,
+      // 调试 / 自动化测试用（无头截图与回归脚本靠它们驱动）
+      stop: function () { stopGen(); },
+      busy: function () { return state.busy; },
+      doc: function () { return state.docPath; },
+      sessions: function () { return state.sessions; },
+      current: function () { return curSession(); },
+      side: function (on) { setSideOpen(on); },
+      checkDoc: checkDocChange,
+      renderMd: function (s) { return mdToHtml(s); },
     };
   }
 

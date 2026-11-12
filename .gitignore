@@ -19,6 +19,7 @@ node_modules/
 .idea/
 .DS_Store
 Thumbs.db
+shots/
 
 # ---- 本地开发脚本（不上传），保留安全/兼容回归测试 ----
 scripts/*
@@ -27,3 +28,4 @@ scripts/*
 !scripts/mock_server.js
 !scripts/test-save-md.js
 !scripts/test-agent-protocol.js
+!scripts/ui-check.js

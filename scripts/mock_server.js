@@ -61,10 +61,26 @@ function sseHead(res) {
   });
 }
 function sseSend(res, obj) { res.write('data: ' + JSON.stringify(obj) + '\n\n'); }
+
+// SLOW > 0 时逐块延迟下发，用来验证「生成中上滑阅读 / 停止 / 回到底部」
+// （?slowstream=40 打开，见 GET / 的查询串处理）
+let SLOW = 0;
+let LONG = false;   // ?long=1：把回答拉长 3 倍，便于验证「流式中滚动 / 停止 / 回到底部」
 function sseText(res, text) {
-  for (let i = 0; i < text.length; i += 6) sseSend(res, { delta: text.slice(i, i + 6) });
-  sseSend(res, { done: true });
-  res.end();
+  if (!SLOW) {
+    for (let i = 0; i < text.length; i += 6) sseSend(res, { delta: text.slice(i, i + 6) });
+    sseSend(res, { done: true });
+    res.end();
+    return;
+  }
+  let i = 0;
+  (function step() {
+    if (res.writableEnded) return;
+    if (i >= text.length) { sseSend(res, { done: true }); res.end(); return; }
+    sseSend(res, { delta: text.slice(i, i + 6) });
+    i += 6;
+    setTimeout(step, SLOW);
+  })();
 }
 
 const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
@@ -88,6 +104,10 @@ const PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
   </div>
 </div>
 <script>
+// 文档路径桩：client.js 通过 window.File.getFilePath() 认「当前打开的 md」。
+// 默认 /mock/alpha.md；?steps=doc:beta 可切换，用来验证「换文件 → 换会话」。
+window.__mockDoc = '/mock/alpha.md';
+try { window.File.getFilePath = function () { return window.__mockDoc || ''; }; } catch (e) {}
 // 脏数据注入：?badagent=1 往 localStorage 写一个结构损坏 + 硬中断残留的 agent
 // 会话，验证 loadSessions 的 normalizeAgent 兜底（旧版本数据 / Typora 崩溃残留）
 if (/[?&]badagent=1/.test(location.search)) {
@@ -247,6 +267,18 @@ if (/[?&]direct=1/.test(location.search)) {
               if (a === 'new') { document.getElementById('tyai-side-new').click(); }
               else if (a === 'fold') { document.getElementById('tyai-side-fold').click(); }
               else if (a === 'unfold') { document.getElementById('tyai-side-unfold').click(); }
+              else if (a === 'stop') { window.__tyai.stop(); }
+              else if (a === 'wait') { /* 空转：用来拉开时序，不做任何操作 */ }
+              else if (a === 'cont') { var cc = document.querySelector('[data-msg-act="continue"]'); if (cc) cc.click(); else console.warn('cont: 没有继续按钮'); }
+              else if (a === 'regen') { var rg = document.querySelector('[data-msg-act="regen"]'); if (rg) rg.click(); else console.warn('regen: 没有重生成按钮'); }
+              else if ((m = a.match(/^doc:([\w.-]+)$/))) {
+                window.__mockDoc = '/mock/' + m[1] + '.md';
+                window.__tyai.checkDoc();
+              }
+              else if ((m = a.match(/^scrollup:(\d+)$/))) {
+                var sc = document.querySelector('.tyai-msgs');
+                if (sc) { sc.__tyaiStick = false; sc.scrollTop = +m[1]; sc.dispatchEvent(new Event('scroll')); }
+              }
               else if ((m = a.match(/^chat:(.*)$/s))) { api.chat(m[1]); }
               else if ((m = a.match(/^agent:(.*)$/s))) { api.agent(m[1]); }
               else if ((m = a.match(/^switch:(\\d+)$/))) {
@@ -339,10 +371,16 @@ const server = http.createServer((req, res) => {
     return res.end(body);
   }
   if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
+    const sv = /[?&]slowstream=(\d+)/.exec(req.url || '');
+    if (sv) SLOW = Math.min(400, Number(sv[1]) || 0);
+    LONG = /[?&]long=1/.test(req.url || '');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(PAGE);
   }
-  if (req.method === 'POST' && pathname === '/chat') { sseHead(res); return sseText(res, CHAT_ANSWER); }
+  if (req.method === 'POST' && pathname === '/chat') {
+    sseHead(res);
+    return sseText(res, LONG ? CHAT_ANSWER + '\n\n---\n\n' + CHAT_ANSWER + '\n\n---\n\n' + CHAT_ANSWER : CHAT_ANSWER);
+  }
   if (req.method === 'POST' && pathname === '/ask') { sseHead(res); return sseText(res, ASK_ANSWER); }
   if (req.method === 'POST' && pathname === '/llm') {
     let raw = '';
