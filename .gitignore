@@ -20,6 +20,8 @@ node_modules/
 .DS_Store
 Thumbs.db
 shots/
+# 安装前的旧版备份（含 config.json，可能带 API Key）
+.backup/
 
 # ---- 本地开发脚本（不上传），保留安全/兼容回归测试 ----
 scripts/*
